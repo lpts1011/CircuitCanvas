@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from .components import Component, VoltageSource
-from .wiring import Junction, Wire
+from .wiring import EndpointRef, Junction, JunctionRef, TerminalRef, Wire
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +49,8 @@ class Circuit:
     revision: int = 0
     open_edge: str | None = "w_main"
     _id_counters: dict[str, int] = field(default_factory=dict)
+    _wire_counter: int = 0
+    _junction_counter: int = 0
 
     @classmethod
     def new(cls, voltage: float = 12.0) -> Circuit:
@@ -75,8 +77,37 @@ class Circuit:
     def remove_component(self, component_id: str) -> Component:
         component = self.components.pop(component_id)
         self.positions.pop(component_id, None)
+        self.rotations.pop(component_id, None)
         self.revision += 1
         return component
+
+    def touch(self) -> None:
+        self.revision += 1
+
+    def next_wire_id(self) -> str:
+        self._wire_counter += 1
+        while f"W{self._wire_counter}" in self.wires:
+            self._wire_counter += 1
+        return f"W{self._wire_counter}"
+
+    def next_junction_id(self) -> str:
+        self._junction_counter += 1
+        while f"J{self._junction_counter}" in self.junctions:
+            self._junction_counter += 1
+        return f"J{self._junction_counter}"
+
+    def assert_endpoint(self, endpoint: EndpointRef) -> None:
+        if isinstance(endpoint, JunctionRef):
+            if endpoint.junction_id not in self.junctions:
+                raise KeyError(endpoint.junction_id)
+            return
+        if endpoint.owner_id != self.source.id and endpoint.owner_id not in self.components:
+            raise KeyError(endpoint.owner_id)
+        if endpoint not in {
+            TerminalRef(endpoint.owner_id, "a"),
+            TerminalRef(endpoint.owner_id, "b"),
+        }:
+            raise ValueError(f"Unknown terminal: {endpoint.terminal}")
 
     def next_id(self, prefix: str) -> str:
         count = self._id_counters.get(prefix, 0) + 1

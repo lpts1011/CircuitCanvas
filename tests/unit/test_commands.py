@@ -9,6 +9,7 @@ from circuitcanvas.commands.circuit_commands import (
 )
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import ComponentKind
+from circuitcanvas.domain.wiring import JunctionRef, TerminalRef
 
 
 def test_repeated_series_and_parallel_additions_preserve_connectivity() -> None:
@@ -49,3 +50,44 @@ def test_command_stack_restores_complete_graph_state() -> None:
     assert set(circuit.components) == {"L1"}
     stack.redo()
     assert set(circuit.components) == {"L1", "C1"}
+
+
+def test_free_wiring_commands_connect_split_move_and_undo() -> None:
+    circuit = Circuit.new()
+    stack = CircuitCommandStack(circuit)
+
+    resistor = stack.add_loose_component(ComponentKind.RESISTOR, 100.0, (300.0, 180.0))
+    wire = stack.connect(TerminalRef("V1", "a"), TerminalRef(resistor, "a"))
+    junction = stack.split_wire(wire, (210.0, 180.0))
+    stack.move_component(resistor, (420.0, 260.0))
+    stack.rotate_component(resistor)
+
+    assert circuit.positions[resistor] == (420.0, 260.0)
+    assert circuit.rotations[resistor] == 90
+    assert any(
+        isinstance(candidate.start, JunctionRef) or isinstance(candidate.end, JunctionRef)
+        for candidate in circuit.wires.values()
+    )
+    assert circuit.junctions[junction].position == (210.0, 180.0)
+
+    assert stack.undo()
+    assert circuit.rotations[resistor] == 0
+    assert stack.undo()
+    assert circuit.positions[resistor] == (300.0, 180.0)
+
+
+def test_deleting_connected_component_leaves_reconnectable_junctions() -> None:
+    circuit = Circuit.new()
+    stack = CircuitCommandStack(circuit)
+    resistor = stack.add_loose_component(ComponentKind.RESISTOR, 100.0, (320.0, 220.0))
+    stack.connect(TerminalRef("V1", "a"), TerminalRef(resistor, "a"))
+
+    stack.delete(resistor)
+
+    assert resistor not in circuit.components
+    assert all(
+        not (isinstance(endpoint, TerminalRef) and endpoint.owner_id == resistor)
+        for wire in circuit.wires.values()
+        for endpoint in (wire.start, wire.end)
+    )
+    assert circuit.junctions
