@@ -56,6 +56,24 @@ class Circuit:
     def new(cls, voltage: float = 12.0) -> Circuit:
         return cls(source=VoltageSource("V1", "n_pos", "n_neg", voltage))
 
+    @classmethod
+    def starter_loop(cls, voltage: float = 12.0) -> Circuit:
+        """Create the editable construction loop shown by a new main window."""
+        circuit = cls.new(voltage)
+        circuit.open_edge = None
+        circuit.junctions = {
+            "J1": Junction("J1", (980.0, 290.0)),
+            "J2": Junction("J2", (980.0, 430.0)),
+        }
+        circuit.wires = {
+            "W1": Wire("W1", TerminalRef("V1", "a"), JunctionRef("J1")),
+            "W2": Wire("W2", JunctionRef("J1"), JunctionRef("J2")),
+            "W3": Wire("W3", JunctionRef("J2"), TerminalRef("V1", "b")),
+        }
+        circuit._wire_counter = 3
+        circuit._junction_counter = 2
+        return circuit
+
     @property
     def entry_nodes(self) -> tuple[str, str]:
         return self.source.endpoints

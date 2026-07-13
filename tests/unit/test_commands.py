@@ -10,6 +10,7 @@ from circuitcanvas.commands.circuit_commands import (
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import ComponentKind
 from circuitcanvas.domain.wiring import JunctionRef, TerminalRef
+from circuitcanvas.solver.validation import validate
 
 
 def test_repeated_series_and_parallel_additions_preserve_connectivity() -> None:
@@ -108,3 +109,22 @@ def test_connect_to_new_junction_is_one_undoable_edit() -> None:
     assert stack.undo()
     assert junction_id not in circuit.junctions
     assert wire_id not in circuit.wires
+
+
+def test_insert_component_on_wire_removes_conductive_bypass_and_undoes_atomically() -> None:
+    circuit = Circuit.starter_loop(12.0)
+    stack = CircuitCommandStack(circuit)
+
+    component_id = stack.insert_component_on_wire(
+        "W1", ComponentKind.RESISTOR, 100.0, (520.0, 290.0), 0, (), ()
+    )
+
+    assert "W1" not in circuit.wires
+    assert len(circuit.wires) == 4
+    assert component_id in circuit.components
+    assert validate(circuit.snapshot()) == ()
+    assert stack.undo()
+    assert circuit.components == {}
+    assert "W1" in circuit.wires
+    assert stack.redo()
+    assert component_id in circuit.components

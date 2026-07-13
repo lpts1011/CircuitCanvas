@@ -242,6 +242,55 @@ class CircuitCommandStack:
         assert isinstance(junction_id, str) and isinstance(wire_id, str)
         return junction_id, wire_id
 
+    def insert_component_on_wire(
+        self,
+        wire_id: str,
+        kind: ComponentKind | str,
+        value: float,
+        position: Point,
+        rotation: int,
+        start_route: tuple[Point, ...] = (),
+        end_route: tuple[Point, ...] = (),
+    ) -> str:
+        """Replace one ideal-wire span with a component as one history entry."""
+        component_kind = _kind(kind)
+
+        def operation() -> str:
+            original = self.circuit.wires[wire_id]
+            component_id = self.circuit.next_id(_PREFIX[component_kind])
+            self.circuit.add_component(
+                make_component(
+                    component_kind,
+                    component_id,
+                    f"loose_{component_id}_a",
+                    f"loose_{component_id}_b",
+                    value,
+                )
+            )
+            self.circuit.positions[component_id] = position
+            self.circuit.rotations[component_id] = rotation % 360
+            del self.circuit.wires[wire_id]
+            start_wire_id = self.circuit.next_wire_id()
+            end_wire_id = self.circuit.next_wire_id()
+            self.circuit.wires[start_wire_id] = Wire(
+                start_wire_id,
+                original.start,
+                TerminalRef(component_id, "a"),
+                start_route,
+            )
+            self.circuit.wires[end_wire_id] = Wire(
+                end_wire_id,
+                TerminalRef(component_id, "b"),
+                original.end,
+                end_route,
+            )
+            self.circuit.touch()
+            return component_id
+
+        result = self._execute(operation)
+        assert isinstance(result, str)
+        return result
+
     def split_wire(self, wire_id: str, position: Point) -> str:
         def operation() -> str:
             wire = self.circuit.wires[wire_id]

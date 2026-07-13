@@ -48,3 +48,14 @@ def test_crossing_wire_routes_do_not_create_connectivity() -> None:
     assert connectivity.node_for(TerminalRef("R1", "a")) != connectivity.node_for(
         TerminalRef("R2", "a")
     )
+
+
+def test_starter_loop_connects_battery_terminals_through_real_wires() -> None:
+    circuit = Circuit.starter_loop(12.0)
+    connectivity = derive_connectivity(circuit)
+
+    assert len(circuit.junctions) == 2
+    assert len(circuit.wires) == 3
+    assert connectivity.node_for(TerminalRef("V1", "a")) == connectivity.node_for(
+        TerminalRef("V1", "b")
+    )
