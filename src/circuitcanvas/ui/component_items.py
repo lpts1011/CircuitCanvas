@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QGraphicsObject, QStyleOptionGraphicsItem, QWidget
+from PySide6.QtWidgets import (
+    QGraphicsObject,
+    QGraphicsSceneMouseEvent,
+    QStyleOptionGraphicsItem,
+    QWidget,
+)
 
 from circuitcanvas.domain.components import Capacitor, Component, Inductor
+from circuitcanvas.domain.wiring import TerminalRef
+
+from .wire_items import TerminalItem
 
 
 class BatteryItem(QGraphicsObject):
-    def __init__(self, voltage: float) -> None:
+    def __init__(self, voltage: float, source_id: str = "V1") -> None:
         super().__init__()
         self.voltage = voltage
+        self.terminals = {
+            "a": TerminalItem(TerminalRef(source_id, "a"), self),
+            "b": TerminalItem(TerminalRef(source_id, "b"), self),
+        }
+        self.terminals["a"].setPos(0, -70)
+        self.terminals["b"].setPos(0, 70)
 
     def boundingRect(self) -> QRectF:
         return QRectF(-42, -70, 84, 140)
@@ -53,6 +67,7 @@ class DropTargetItem(QGraphicsObject):
 
 
 class ComponentItem(QGraphicsObject):
+    moved = Signal(str, float, float)
     COLORS = {
         "resistor": ("#ef4444", "#fff7f7"),
         "capacitor": ("#f59e0b", "#fffbeb"),
@@ -63,8 +78,17 @@ class ComponentItem(QGraphicsObject):
         super().__init__()
         self.component = component
         self.measurement_text = "V —  ·  I —"
-        self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsSelectable)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.terminals = {
+            "a": TerminalItem(TerminalRef(component.id, "a"), self),
+            "b": TerminalItem(TerminalRef(component.id, "b"), self),
+        }
+        self.terminals["a"].setPos(-84, 0)
+        self.terminals["b"].setPos(84, 0)
+        self.setFlags(
+            QGraphicsObject.GraphicsItemFlag.ItemIsSelectable
+            | QGraphicsObject.GraphicsItemFlag.ItemIsMovable
+        )
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def boundingRect(self) -> QRectF:
         return QRectF(-84, -49, 168, 98)
@@ -135,3 +159,8 @@ class ComponentItem(QGraphicsObject):
         if isinstance(self.component, Inductor):
             return f"{self.component.id} · {value * 1e3:g} mH"
         return f"{self.component.id} · {value:g} Ω"
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        position = self.scenePos()
+        self.moved.emit(self.component.id, position.x(), position.y())
