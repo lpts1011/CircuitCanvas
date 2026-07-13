@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "source": {"id": "V1", "node_a": "n_pos", "node_b": "n_neg", "voltage": 10.0},
+  "components": [
+    {"id": "R1", "kind": "resistor", "node_a": "n_pos", "node_b": "n1", "value": 10.0, "rotation": 0},
+    {"id": "L1", "kind": "inductor", "node_a": "n1", "node_b": "n2", "value": 0.05, "rotation": 0},
+    {"id": "C1", "kind": "capacitor", "node_a": "n2", "node_b": "n_neg", "value": 0.0001, "rotation": 0}
+  ],
+  "nodes": ["n1", "n2", "n_neg", "n_pos"],
+  "positions": {"R1": [180.0, 80.0], "L1": [350.0, 80.0], "C1": [520.0, 80.0]},
+  "settings": {"duration": 0.05, "samples": 1000, "method": "trapezoidal"},
+  "open_edge": null
+}
