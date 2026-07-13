@@ -221,6 +221,27 @@ class CircuitCommandStack:
         assert isinstance(result, str)
         return result
 
+    def connect_to_new_junction(
+        self, start: EndpointRef, position: Point, route: tuple[Point, ...] = ()
+    ) -> tuple[str, str]:
+        """Finish a wire on empty canvas as one undoable edit."""
+
+        def operation() -> tuple[str, str]:
+            self.circuit.assert_endpoint(start)
+            junction_id = self.circuit.next_junction_id()
+            junction_ref = JunctionRef(junction_id)
+            self.circuit.junctions[junction_id] = Junction(junction_id, position)
+            wire_id = self.circuit.next_wire_id()
+            self.circuit.wires[wire_id] = Wire(wire_id, start, junction_ref, route)
+            self.circuit.touch()
+            return junction_id, wire_id
+
+        result = self._execute(operation)
+        assert isinstance(result, tuple) and len(result) == 2
+        junction_id, wire_id = result
+        assert isinstance(junction_id, str) and isinstance(wire_id, str)
+        return junction_id, wire_id
+
     def split_wire(self, wire_id: str, position: Point) -> str:
         def operation() -> str:
             wire = self.circuit.wires[wire_id]

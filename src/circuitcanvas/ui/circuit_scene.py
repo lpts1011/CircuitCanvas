@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from circuitcanvas.commands.circuit_commands import CircuitCommandStack
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import ComponentKind
-from circuitcanvas.domain.wiring import EndpointRef, JunctionRef, TerminalRef
+from circuitcanvas.domain.wiring import EndpointRef, JunctionRef
 from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.results import SimulationResult
 
@@ -54,8 +54,9 @@ class CircuitScene(QGraphicsScene):
         self.route_handle_items: list[RouteHandleItem] = []
         self.battery_item: BatteryItem | None = None
         self.open_target: DropTargetItem | None = None
-        self._wire_start: TerminalRef | None = None
+        self._wire_start: EndpointRef | None = None
         self._wire_preview: QGraphicsLineItem | None = None
+        self._suppress_selection_signal = False
         self.highlighted_components: set[str] = set()
         self.setSceneRect(QRectF(0, 0, 1200, 620))
         self.selectionChanged.connect(self._selection_updated)
@@ -226,6 +227,14 @@ class CircuitScene(QGraphicsScene):
             return self.battery_item.terminals[endpoint.terminal].scenePos()
         return self.component_items[endpoint.owner_id].terminals[endpoint.terminal].scenePos()
 
+    @staticmethod
+    def _endpoint_for_item(item: object) -> EndpointRef | None:
+        if isinstance(item, TerminalItem):
+            return item.ref
+        if isinstance(item, JunctionItem):
+            return JunctionRef(item.junction_id)
+        return None
+
     def _component_moved(self, component_id: str, x: float, y: float) -> None:
         self.command_stack.move_component(component_id, (x, y))
         self.rebuild()
@@ -250,6 +259,8 @@ class CircuitScene(QGraphicsScene):
         return None
 
     def _selection_updated(self) -> None:
+        if self._suppress_selection_signal:
+            return
         selected = self.selected_component_id()
         if selected is not None:
             self.selection_changed.emit(selected)
@@ -285,10 +296,18 @@ class CircuitScene(QGraphicsScene):
         return component_id
 
     def connect_for_test(self, start: EndpointRef, end: EndpointRef) -> str:
-        wire_id = self.command_stack.connect(start, end)
+        route = self._orthogonal_route(self._endpoint_position(start), self._endpoint_position(end))
+        wire_id = self.command_stack.connect(start, end, route)
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
         return wire_id
+
+    @staticmethod
+    def _orthogonal_route(start: QPointF, end: QPointF) -> tuple[tuple[float, float], ...]:
+        if abs(start.x() - end.x()) < 1.0 or abs(start.y() - end.y()) < 1.0:
+            return ()
+        middle_x = (start.x() + end.x()) / 2.0
+        return ((middle_x, start.y()), (middle_x, end.y()))
 
     def split_wire_at(self, wire_id: str, position: QPointF) -> str:
         junction_id = self.command_stack.split_wire(wire_id, (position.x(), position.y()))
@@ -317,20 +336,30 @@ class CircuitScene(QGraphicsScene):
             item.advance_phase(seconds)
 
     def highlight_equation(self, line: EquationLine) -> None:
-        self.clearSelection()
-        self.highlighted_components = set(line.component_ids)
-        for component_id in line.component_ids:
-            item = self.component_items.get(component_id)
-            if item is not None:
-                item.setSelected(True)
+        self._suppress_selection_signal = True
+        try:
+            self.clearSelection()
+            self.highlighted_components = set(line.component_ids)
+            for component_id in line.component_ids:
+                item = self.component_items.get(component_id)
+                if item is not None:
+                    item.setSelected(True)
+        finally:
+            self._suppress_selection_signal = False
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         item = self.itemAt(event.scenePos(), QTransform())
-        if isinstance(item, TerminalItem) and isinstance(item.ref, TerminalRef):
-            self._wire_start = item.ref
+        endpoint = self._endpoint_for_item(item)
+        junction_wire_drag = isinstance(item, JunctionItem) and bool(
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        )
+        if isinstance(item, TerminalItem) or junction_wire_drag:
+            assert endpoint is not None
+            self._wire_start = endpoint
+            start_position = self._endpoint_position(endpoint)
             self._wire_preview = self.addLine(
-                item.scenePos().x(),
-                item.scenePos().y(),
+                start_position.x(),
+                start_position.y(),
                 event.scenePos().x(),
                 event.scenePos().y(),
                 QPen(QColor("#0ea5e9"), 3, Qt.PenStyle.DashLine),
@@ -354,22 +383,30 @@ class CircuitScene(QGraphicsScene):
             super().mouseReleaseEvent(event)
             return
         start = self._wire_start
-        target = self.itemAt(event.scenePos(), QTransform())
         if self._wire_preview is not None:
             self.removeItem(self._wire_preview)
+        target = self.itemAt(event.scenePos(), QTransform())
         self._wire_start = None
         self._wire_preview = None
-        if isinstance(target, TerminalItem) and target.ref != start:
-            self.command_stack.connect(start, target.ref)
+        start_position = self._endpoint_position(start)
+        end_position = event.scenePos()
+        route = self._orthogonal_route(start_position, end_position)
+        target_endpoint = self._endpoint_for_item(target)
+        if target_endpoint == start:
+            self.rebuild()
+            event.accept()
+            return
+        if target_endpoint is not None:
+            self.command_stack.connect(start, target_endpoint, route)
         elif isinstance(target, WireItem):
             junction_id = self.command_stack.split_wire(
                 target.wire.id, (event.scenePos().x(), event.scenePos().y())
             )
-            self.command_stack.connect(start, JunctionRef(junction_id))
+            self.command_stack.connect(start, JunctionRef(junction_id), route)
         else:
-            self.rebuild()
-            event.accept()
-            return
+            self.command_stack.connect_to_new_junction(
+                start, (end_position.x(), end_position.y()), route
+            )
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
         event.accept()

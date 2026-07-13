@@ -27,3 +27,19 @@ def test_undo_and_redo_restore_component(qtbot) -> None:
     assert len(window.circuit.components) == 0
     window.redo()
     assert len(window.circuit.components) == 1
+
+
+def test_toolbar_rotates_and_deletes_selected_component(qtbot) -> None:
+    from PySide6.QtCore import QPointF
+
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    component_id = window.scene.insert_component_at("resistor", QPointF(420.0, 260.0))
+
+    window.rotate_action.trigger()
+    assert window.circuit.rotations[component_id] == 90
+
+    window.delete_action.trigger()
+    assert component_id not in window.circuit.components

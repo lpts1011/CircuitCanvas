@@ -53,3 +53,14 @@ def test_selecting_equation_emits_the_equation(qtbot) -> None:
         panel.select_equation("KVL1")
 
     assert signal.args[0].id == "KVL1"
+
+
+def test_report_refresh_preserves_selected_equation(qtbot) -> None:
+    panel = EquationPanel()
+    qtbot.addWidget(panel)
+    panel.set_report(sample_report())
+    panel.select_equation("KVL1")
+
+    panel.set_report(sample_report())
+
+    assert "V_V1 - V_R1" in panel.visible_text()

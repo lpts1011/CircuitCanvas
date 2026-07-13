@@ -91,3 +91,20 @@ def test_deleting_connected_component_leaves_reconnectable_junctions() -> None:
         for endpoint in (wire.start, wire.end)
     )
     assert circuit.junctions
+
+
+def test_connect_to_new_junction_is_one_undoable_edit() -> None:
+    circuit = Circuit.new()
+    stack = CircuitCommandStack(circuit)
+    resistor = stack.add_loose_component(ComponentKind.RESISTOR, 100.0, (320.0, 220.0))
+
+    junction_id, wire_id = stack.connect_to_new_junction(
+        TerminalRef(resistor, "b"), (540.0, 300.0), ((430.0, 220.0), (430.0, 300.0))
+    )
+
+    assert circuit.junctions[junction_id].position == (540.0, 300.0)
+    assert circuit.wires[wire_id].end == JunctionRef(junction_id)
+    assert len(circuit.wires[wire_id].route) == 2
+    assert stack.undo()
+    assert junction_id not in circuit.junctions
+    assert wire_id not in circuit.wires

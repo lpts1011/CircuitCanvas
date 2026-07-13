@@ -1,7 +1,9 @@
 from PySide6.QtCore import QPointF
+from PySide6.QtTest import QSignalSpy
 
 from circuitcanvas.domain.circuit import Circuit
-from circuitcanvas.domain.wiring import TerminalRef
+from circuitcanvas.domain.wiring import JunctionRef, TerminalRef
+from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.transient import simulate
 from circuitcanvas.ui.circuit_scene import CircuitScene
 
@@ -75,10 +77,35 @@ def test_free_component_keeps_drop_position_and_exposes_terminals(qtbot) -> None
 def test_scene_connects_arbitrary_component_terminals(qtbot) -> None:
     scene = CircuitScene(Circuit.new())
     r1 = scene.insert_component_at("resistor", QPointF(360.0, 180.0))
-    r2 = scene.insert_component_at("resistor", QPointF(580.0, 180.0))
+    r2 = scene.insert_component_at("resistor", QPointF(580.0, 300.0))
 
     wire_id = scene.connect_for_test(TerminalRef(r1, "b"), TerminalRef(r2, "a"))
 
     assert wire_id in scene.wire_items
     assert scene.circuit.wires[wire_id].start == TerminalRef(r1, "b")
     assert scene.circuit.wires[wire_id].end == TerminalRef(r2, "a")
+    assert len(scene.circuit.wires[wire_id].route) == 2
+    assert len(scene.route_handle_items) == 2
+
+
+def test_equation_highlight_does_not_retrigger_component_navigation(qtbot) -> None:
+    scene = CircuitScene(Circuit.new())
+    resistor = scene.insert_component_at("resistor", QPointF(360.0, 180.0))
+    spy = QSignalSpy(scene.selection_changed)
+    line = EquationLine("KVL1", "kvl", "V_R1 = 0", "0 = 0", "residual = 0", 0.0, (resistor,), ())
+
+    scene.highlight_equation(line)
+
+    assert scene.component_items[resistor].isSelected()
+    assert spy.count() == 0
+
+
+def test_junction_dot_is_a_wire_start_and_end_target(qtbot) -> None:
+    scene = CircuitScene(Circuit.new())
+    resistor = scene.insert_component_at("resistor", QPointF(360.0, 180.0))
+    junction_id, _ = scene.command_stack.connect_to_new_junction(
+        TerminalRef(resistor, "b"), (560.0, 260.0)
+    )
+    scene.rebuild()
+
+    assert scene._endpoint_for_item(scene.junction_items[junction_id]) == JunctionRef(junction_id)

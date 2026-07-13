@@ -59,6 +59,12 @@ class EquationPanel(QWidget):
         self.differential_button.clicked.connect(self._show_differential)
 
     def set_report(self, report: EquationReport) -> None:
+        current = self.tree.currentItem()
+        previous_id = (
+            str(current.data(0, Qt.ItemDataRole.UserRole))
+            if current is not None and current.data(0, Qt.ItemDataRole.UserRole) is not None
+            else None
+        )
         self._report = report
         self._lines = {line.id: line for line in (*report.kcl, *report.kvl, *report.laws)}
         self.tree.clear()
@@ -81,7 +87,9 @@ class EquationPanel(QWidget):
                 parent.addChild(child)
             parent.setExpanded(True)
         if self.ordinary_button.isChecked() and self._lines:
-            self.select_equation(next(iter(self._lines)))
+            self.select_equation(
+                previous_id if previous_id in self._lines else next(iter(self._lines))
+            )
         else:
             self._show_differential()
 

@@ -55,6 +55,13 @@ def _signed_expression(terms: list[tuple[int, str]]) -> str:
     return "".join(pieces) if pieces else "0"
 
 
+def _numeric_expression(terms: list[tuple[int, float]]) -> str:
+    signed_values = [
+        (1 if sign * value >= 0.0 else -1, f"{abs(sign * value):.6g}") for sign, value in terms
+    ]
+    return _signed_expression(signed_values)
+
+
 def _edges(snapshot: CircuitSnapshot, result: SimulationResult, index: int) -> list[_Edge]:
     source_voltage = float(
         result.node_voltages[snapshot.source.node_a][index]
@@ -95,13 +102,13 @@ def _kcl_lines(snapshot: CircuitSnapshot, edges: list[_Edge]) -> tuple[EquationL
                 signed_edges.append((-1, edge))
         residual = sum(sign * edge.current for sign, edge in signed_edges)
         terms = [(sign, f"I_{edge.id}") for sign, edge in signed_edges]
-        values = [(sign, f"{abs(edge.current):.6g}") for sign, edge in signed_edges]
+        values = [(sign, edge.current) for sign, edge in signed_edges]
         lines.append(
             EquationLine(
                 f"KCL{number}",
                 "kcl",
                 f"{_signed_expression(terms)} = 0",
-                f"{_signed_expression(values)} = 0",
+                f"{_numeric_expression(values)} = 0",
                 f"residual = {residual:.3g} A",
                 residual,
                 tuple(edge.id for _, edge in signed_edges),
@@ -171,7 +178,7 @@ def _kvl_lines(edges: list[_Edge]) -> tuple[EquationLine, ...]:
     for number, cycle in enumerate(_cycle_edges(edges), start=1):
         residual = sum(sign * edges[index].voltage for index, sign in cycle)
         terms = [(sign, f"V_{edges[index].id}") for index, sign in cycle]
-        values = [(sign, f"{abs(edges[index].voltage):.6g}") for index, sign in cycle]
+        values = [(sign, edges[index].voltage) for index, sign in cycle]
         component_ids = tuple(edges[index].id for index, _ in cycle)
         node_ids = tuple(
             dict.fromkeys(
@@ -183,7 +190,7 @@ def _kvl_lines(edges: list[_Edge]) -> tuple[EquationLine, ...]:
                 f"KVL{number}",
                 "kvl",
                 f"{_signed_expression(terms)} = 0",
-                f"{_signed_expression(values)} = 0",
+                f"{_numeric_expression(values)} = 0",
                 f"residual = {residual:.3g} V",
                 residual,
                 component_ids,

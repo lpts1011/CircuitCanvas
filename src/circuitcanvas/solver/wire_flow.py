@@ -79,8 +79,7 @@ def reconstruct_wire_flows(
             incidence[ref_indices[wire.start], column] = -1.0
             incidence[ref_indices[wire.end], column] = 1.0
         injection_values = [
-            injections.get(ref, 0.0) if isinstance(ref, TerminalRef) else 0.0
-            for ref in group_refs
+            injections.get(ref, 0.0) if isinstance(ref, TerminalRef) else 0.0 for ref in group_refs
         ]
         q: NDArray[np.float64] = np.asarray(injection_values, dtype=np.float64)
         flow, _, _, _ = lstsq(incidence, -q, lapack_driver="gelsy")

@@ -24,6 +24,7 @@ def test_parallel_series_fixture_has_independent_kcl_and_kvl() -> None:
     assert len(report.kvl) == 2
     assert max(abs(line.residual) for line in (*report.kcl, *report.kvl)) < 1e-9
     assert "0.085" in "\n".join(line.substituted for line in report.kcl)
+    assert any("-0.17 + 0.085 + 0.085 = 0" in line.substituted for line in report.kcl)
 
 
 def test_differential_report_expands_reactive_laws_and_mna() -> None:

@@ -84,6 +84,12 @@ class MainWindow(QMainWindow):
         redo_action = QAction("Redo", self)
         redo_action.setShortcut(QKeySequence.StandardKey.Redo)
         redo_action.triggered.connect(self.redo)
+        self.rotate_action = QAction("Rotate", self)
+        self.rotate_action.setShortcut(QKeySequence("R"))
+        self.rotate_action.triggered.connect(self.scene.rotate_selected)
+        self.delete_action = QAction("Delete", self)
+        self.delete_action.setShortcut(QKeySequence(Qt.Key.Key_Delete))
+        self.delete_action.triggered.connect(self._delete_selected)
         image_action = QAction("Export PNG", self)
         image_action.triggered.connect(self.export_png)
         data_action = QAction("Export CSV", self)
@@ -94,6 +100,8 @@ class MainWindow(QMainWindow):
             save_action,
             undo_action,
             redo_action,
+            self.rotate_action,
+            self.delete_action,
             image_action,
             data_action,
         ):
@@ -164,6 +172,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(center)
         splitter.addWidget(sidebar)
         splitter.setStretchFactor(0, 1)
+        splitter.setSizes([1030, 390])
         root_layout.addWidget(splitter)
         self.setCentralWidget(root)
 
@@ -223,6 +232,11 @@ class MainWindow(QMainWindow):
         self.analysis.clear()
         self.scene.rebuild()
         self._circuit_changed(self.circuit.revision)
+
+    def _delete_selected(self) -> None:
+        component_id = self.scene.selected_component_id()
+        if component_id is not None:
+            self._delete_component(component_id)
 
     def _duplicate_parallel(self, component_id: str) -> None:
         component = self.circuit.components[component_id]

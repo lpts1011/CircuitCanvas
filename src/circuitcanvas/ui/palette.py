@@ -56,7 +56,8 @@ class ComponentPalette(QWidget):
             )
             layout.addWidget(button)
         hint = QLabel(
-            "Drag onto the wire for series.\nDrop below a component for a parallel branch."
+            "Drag onto the canvas to place freely.\n"
+            "Drag terminal dots to connect; drop on a wire to branch."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#64748b;font-size:11px;margin-top:6px")
