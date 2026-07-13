@@ -67,6 +67,17 @@ def test_schema_two_round_trip_preserves_wires_routes_and_rotation() -> None:
     assert junction in restored.junctions
 
 
+def test_starter_loop_round_trip_preserves_its_closed_construction_wiring() -> None:
+    circuit = Circuit.starter_loop(12.0)
+
+    restored = circuit_from_dict(circuit_to_dict(circuit))
+
+    assert restored.wires == circuit.wires
+    assert restored.junctions == circuit.junctions
+    assert restored.open_edge is None
+    assert restored.snapshot().source.node_a == restored.snapshot().source.node_b
+
+
 def test_schema_one_migration_preserves_parallel_topology() -> None:
     payload = {
         "schema_version": 1,

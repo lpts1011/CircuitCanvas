@@ -37,13 +37,16 @@ sequenceDiagram
 
 ## Physical wiring and electrical connectivity
 
-Every component and the battery expose two stable terminal references. A wire joins two terminal or junction references and may carry any number of visual route points. A union-find pass collapses each connected ideal-wire set into one solver node when an immutable snapshot is created.
+Every component and the battery expose two stable terminal references. A wire joins two terminal or junction references and may carry any number of visual route points. The UI normalizes those routes so each displayed segment is horizontal, vertical, or exactly 45°. A union-find pass collapses each connected ideal-wire set into one solver node when an immutable snapshot is created.
 
 This separation makes the rules unambiguous:
 
 - moving a component or a bend changes only layout;
 - crossing wire paths do not connect;
 - dropping on a wire splits it with an explicit junction;
+- dropping a component on a wire atomically replaces that span with a series element;
+- parallel duplication atomically adds the component and both branch wires;
+- dragged junctions and route handles are projected onto their existing wire path;
 - multiple branches may share either terminal, so arbitrary series/parallel combinations are natural; and
 - solver connectivity never depends on pixel distance.
 

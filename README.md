@@ -1,6 +1,6 @@
 # CircuitCanvas
 
-**A free-wiring RLC circuit builder and time-domain simulator.** Place resistors, capacitors, and inductors anywhere, wire their terminals into arbitrary linear topologies, and watch the Kirchhoff equations, current direction, voltage, power, and stored energy update automatically.
+**A visual RLC circuit builder and time-domain simulator.** Start from a complete construction loop, insert resistors, capacitors, and inductors in series or parallel, and watch the Kirchhoff equations, current direction, voltage, power, and stored energy update automatically.
 
 ![CircuitCanvas showing a free-wired Kirchhoff analysis](docs/images/circuitcanvas-main.png)
 
@@ -16,8 +16,11 @@ The application does not call an external circuit simulator. Its Python solver a
 
 ## Highlights
 
-- Free-form terminal wiring with explicit junctions and non-connecting wire crossings
-- Movable components, 90° rotation, draggable junctions, and editable wire bends
+- A ready-made battery loop that becomes a valid circuit as soon as a component replaces part of its wire
+- Drop-on-wire series insertion plus automatically wired parallel duplication
+- Explicit terminal wiring with junctions and non-connecting wire crossings
+- Clean horizontal, vertical, or 45° wire routing—never arbitrary-angle segments
+- Movable components, 90° rotation, route-constrained junctions, and editable wire bends
 - Repeated addition of any practical number of R, C, and L components
 - Direct value entry, SI units, and logarithmic parameter sliders
 - Live voltage and current labels next to every component
@@ -50,11 +53,11 @@ On Windows, activate the environment with `.venv\Scripts\activate` before runnin
 
 ## Build a circuit
 
-1. Drag any number of components from the **Components** tab onto the canvas.
-2. Drag an orange terminal dot to another terminal to make a connection.
-3. Drop a new wire onto an existing wire to create a real electrical junction. A visual crossing without a junction dot remains disconnected.
-4. Drop a wire on empty canvas to create a movable junction. Shift-drag a junction dot to continue wiring from it.
-5. Drag components and junction dots to reshape the circuit. Drag the square bend handles, or double-click a wire to add another handle.
+1. The canvas opens with a battery and a complete construction loop. This wire-only loop is intentionally marked as a short circuit until you insert a component.
+2. Drop a component directly on a wire to replace that span and insert it **in series**. Palette clicks use the longest available span automatically.
+3. Select a component and choose **Add parallel** to create a fully wired parallel branch, or place a component away from a wire and connect it manually.
+4. Drag an orange terminal dot to another terminal to make a connection. Drop a new wire onto an existing wire to create a real electrical junction; a visual crossing without a junction dot remains disconnected.
+5. Shift-drag a junction dot to continue wiring from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
 6. Select a component and use **Rotate** (or `R`), **Delete**, the value field, or the logarithmic slider.
 7. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation highlights its circuit elements.
 8. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
@@ -118,7 +121,7 @@ The source remains Windows-compatible; a Windows executable can be built from th
 
 ## Current scope
 
-Version 0.2 models one ideal DC source and arbitrary ideal-wire networks of linear R, C, and L components. It intentionally does not claim support for diodes, transistors, dependent or multiple sources, wire resistance, or frequency-domain analysis.
+Version 0.3 models one ideal DC source and arbitrary ideal-wire networks of linear R, C, and L components. It intentionally does not claim support for diodes, transistors, dependent or multiple sources, wire resistance, or frequency-domain analysis.
 
 Current inside a zero-resistance wire loop is not physically unique. CircuitCanvas therefore displays the deterministic minimum-norm wire-flow solution that satisfies every terminal injection and KCL constraint; component currents and all electrical results still come directly from MNA.
 

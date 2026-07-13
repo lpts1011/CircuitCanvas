@@ -1,4 +1,4 @@
-"""Render a deterministic portfolio screenshot with the bundled RLC example."""
+"""Render a deterministic portfolio screenshot with a Kirchhoff branch example."""
 
 from __future__ import annotations
 
@@ -19,9 +19,16 @@ def main() -> int:
     app = QApplication([])
     configure_application(app)
     window = MainWindow(debounce_ms=0)
-    window._replace_circuit(load_circuit("examples/rlc-underdamped.json"))
-    window.scene.component_items["C1"].setSelected(True)
+    window.resize(1600, 960)
+    window._replace_circuit(load_circuit("examples/parallel-series-17v.json"))
+    window.scene.component_items["R1"].setSelected(True)
+    window.sidebar_tabs.setCurrentWidget(window.equations)
     window.show()
+
+    def prepare_capture() -> None:
+        window.view.horizontalScrollBar().setValue(0)
+        window.view.verticalScrollBar().setValue(0)
+        QTimer.singleShot(300, capture)
 
     def capture() -> None:
         target = Path("docs/images/circuitcanvas-main.png")
@@ -32,7 +39,7 @@ def main() -> int:
             raise RuntimeError(f"Could not save {target}")
         app.quit()
 
-    QTimer.singleShot(2500, capture)
+    QTimer.singleShot(2200, prepare_capture)
     return app.exec()
 
 
