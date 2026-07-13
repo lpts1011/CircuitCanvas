@@ -27,9 +27,7 @@ def test_arbitrary_endpoints_get_only_octilinear_segments() -> None:
     points = (start, *octilinear_route(start, end), end)
 
     assert len(points) == 3
-    assert all(
-        is_octilinear(left, right) for left, right in zip(points, points[1:], strict=False)
-    )
+    assert all(is_octilinear(left, right) for left, right in zip(points, points[1:], strict=False))
 
 
 def test_point_is_projected_to_nearest_position_on_polyline() -> None:
@@ -40,13 +38,9 @@ def test_point_is_projected_to_nearest_position_on_polyline() -> None:
 
 
 def test_normalization_removes_duplicates_and_repairs_forbidden_angles() -> None:
-    points = normalized_octilinear_polyline(
-        ((0.0, 0.0), (0.0, 0.0), (70.0, 25.0), (120.0, 60.0))
-    )
+    points = normalized_octilinear_polyline(((0.0, 0.0), (0.0, 0.0), (70.0, 25.0), (120.0, 60.0)))
 
     assert points[0] == (0.0, 0.0)
     assert points[-1] == (120.0, 60.0)
     assert len(points) == len(set(points))
-    assert all(
-        is_octilinear(left, right) for left, right in zip(points, points[1:], strict=False)
-    )
+    assert all(is_octilinear(left, right) for left, right in zip(points, points[1:], strict=False))

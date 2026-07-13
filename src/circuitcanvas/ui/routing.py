@@ -12,11 +12,7 @@ TOLERANCE = 1e-6
 def is_octilinear(start: Point, end: Point, tolerance: float = TOLERANCE) -> bool:
     dx = end[0] - start[0]
     dy = end[1] - start[1]
-    return (
-        abs(dx) <= tolerance
-        or abs(dy) <= tolerance
-        or abs(abs(dx) - abs(dy)) <= tolerance
-    )
+    return abs(dx) <= tolerance or abs(dy) <= tolerance or abs(abs(dx) - abs(dy)) <= tolerance
 
 
 def project_to_octilinear(origin: Point, point: Point) -> Point:
@@ -33,8 +29,7 @@ def project_to_octilinear(origin: Point, point: Point) -> Point:
     )
     return min(
         candidates,
-        key=lambda candidate: (candidate[0] - point[0]) ** 2
-        + (candidate[1] - point[1]) ** 2,
+        key=lambda candidate: (candidate[0] - point[0]) ** 2 + (candidate[1] - point[1]) ** 2,
     )
 
 
@@ -58,9 +53,7 @@ def _project_to_segment(point: Point, start: Point, end: Point) -> Point:
     length_squared = dx * dx + dy * dy
     if length_squared <= TOLERANCE**2:
         return start
-    fraction = (
-        (point[0] - start[0]) * dx + (point[1] - start[1]) * dy
-    ) / length_squared
+    fraction = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_squared
     fraction = max(0.0, min(1.0, fraction))
     return (start[0] + fraction * dx, start[1] + fraction * dy)
 
@@ -77,8 +70,7 @@ def project_to_polyline(point: Point, polyline: tuple[Point, ...]) -> Point:
     ]
     return min(
         candidates,
-        key=lambda candidate: (candidate[0] - point[0]) ** 2
-        + (candidate[1] - point[1]) ** 2,
+        key=lambda candidate: (candidate[0] - point[0]) ** 2 + (candidate[1] - point[1]) ** 2,
     )
 
 

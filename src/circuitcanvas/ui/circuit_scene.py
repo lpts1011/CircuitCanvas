@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from circuitcanvas.commands.circuit_commands import CircuitCommandStack
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import ComponentKind
-from circuitcanvas.domain.wiring import EndpointRef, JunctionRef
+from circuitcanvas.domain.wiring import EndpointRef, JunctionRef, TerminalRef
 from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.results import SimulationResult
 
@@ -325,6 +325,24 @@ class CircuitScene(QGraphicsScene):
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
 
+    def place_component(self, kind: ComponentKind | str, position: QPointF) -> str:
+        item = self.itemAt(position, QTransform())
+        if isinstance(item, WireItem):
+            return self.insert_component_on_wire(kind, item.wire.id, position)
+        return self.insert_component_at(kind, position)
+
+    def best_wire_insertion(self) -> tuple[str, QPointF]:
+        candidates: list[tuple[float, str, QPointF]] = []
+        for wire_id, item in self.wire_items.items():
+            for start, end in zip(item.polyline_points(), item.polyline_points()[1:], strict=False):
+                length = math.dist((start.x(), start.y()), (end.x(), end.y()))
+                midpoint = QPointF((start.x() + end.x()) / 2.0, (start.y() + end.y()) / 2.0)
+                candidates.append((length, wire_id, midpoint))
+        if not candidates:
+            raise ValueError("No wire is available for component insertion")
+        _, wire_id, midpoint = max(candidates, key=lambda candidate: candidate[0])
+        return wire_id, midpoint
+
     def insert_component_on_wire(
         self, kind: ComponentKind | str, wire_id: str, position: QPointF
     ) -> str:
@@ -343,12 +361,7 @@ class CircuitScene(QGraphicsScene):
         center = project_to_polyline(pointer, (start, end))
         vertical = abs(end[0] - start[0]) < 1.0 and abs(end[1] - start[1]) >= 1.0
         rotation = 90 if vertical else 0
-        if vertical:
-            terminal_a = (center[0], center[1] - 84.0)
-            terminal_b = (center[0], center[1] + 84.0)
-        else:
-            terminal_a = (center[0] - 84.0, center[1])
-            terminal_b = (center[0] + 84.0, center[1])
+        terminal_a, terminal_b = self._component_terminal_positions(center, rotation)
         wire = self.circuit.wires[wire_id]
         component_id = self.command_stack.insert_component_on_wire(
             wire_id,
@@ -363,6 +376,45 @@ class CircuitScene(QGraphicsScene):
         self.component_items[component_id].setSelected(True)
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
+
+    @staticmethod
+    def _component_terminal_positions(
+        position: tuple[float, float], rotation: int
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        if rotation % 180 == 90:
+            return (
+                (position[0], position[1] - 84.0),
+                (position[0], position[1] + 84.0),
+            )
+        return (
+            (position[0] - 84.0, position[1]),
+            (position[0] + 84.0, position[1]),
+        )
+
+    def duplicate_parallel(self, component_id: str) -> str:
+        component = self.circuit.components[component_id]
+        position = self.circuit.positions[component_id]
+        rotation = self.circuit.rotations.get(component_id, component.rotation)
+        if rotation % 180 == 90:
+            new_position = (position[0] + 220.0, position[1])
+        else:
+            new_position = (position[0], position[1] + 140.0)
+        new_a, new_b = self._component_terminal_positions(new_position, rotation)
+        target_a = self._stored_endpoint_position(TerminalRef(component_id, "a"))
+        target_b = self._stored_endpoint_position(TerminalRef(component_id, "b"))
+        new_id = self.command_stack.add_parallel_wired(
+            component_id,
+            component.kind,
+            component.value,
+            new_position,
+            rotation,
+            octilinear_route(target_a, new_a),
+            octilinear_route(target_b, new_b),
+        )
+        self.rebuild()
+        self.component_items[new_id].setSelected(True)
+        self.circuit_changed.emit(self.circuit.revision)
+        return new_id
 
     def connect_for_test(self, start: EndpointRef, end: EndpointRef) -> str:
         route = self._orthogonal_route(self._endpoint_position(start), self._endpoint_position(end))
@@ -555,5 +607,5 @@ class CircuitView(QGraphicsView):
         scene = self.scene()
         assert isinstance(scene, CircuitScene)
         scene_pos = self.mapToScene(event.position().toPoint())
-        scene.insert_component_at(kind, scene_pos)
+        scene.place_component(kind, scene_pos)
         event.acceptProposedAction()

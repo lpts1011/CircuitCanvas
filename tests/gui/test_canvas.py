@@ -174,3 +174,12 @@ def test_new_route_handle_is_projected_onto_wire(qtbot) -> None:
     scene.add_route_handle_at("W1", QPointF(410.0, 337.0))
 
     assert scene.circuit.wires["W1"].route[-1] == pytest.approx((410.0, 290.0))
+
+
+def test_placing_component_on_visible_wire_inserts_it_in_series(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+
+    component_id = scene.place_component("resistor", QPointF(520.0, 290.0))
+
+    assert "W1" not in scene.circuit.wires
+    assert component_id in scene.circuit.components

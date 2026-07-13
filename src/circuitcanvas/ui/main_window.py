@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("CircuitCanvas — Interactive RLC Simulator")
         self.resize(1420, 880)
-        self.circuit = Circuit.new(12.0)
+        self.circuit = Circuit.starter_loop(12.0)
         self.current_result: SimulationResult | None = None
         self.current_time_index = 0
         self._current_path: Path | None = None
@@ -202,6 +202,9 @@ class MainWindow(QMainWindow):
         self.playback.time_index_changed.connect(self.analysis.time_slider.setValue)
 
     def add_component(self, kind: str) -> str:
+        if self.circuit.wires:
+            wire_id, position = self.scene.best_wire_insertion()
+            return self.scene.insert_component_on_wire(kind, wire_id, position)
         return self.scene.insert_component_for_test(kind)
 
     def _circuit_changed(self, revision: int) -> None:
@@ -239,6 +242,9 @@ class MainWindow(QMainWindow):
             self._delete_component(component_id)
 
     def _duplicate_parallel(self, component_id: str) -> None:
+        if self.circuit.wires:
+            self.scene.duplicate_parallel(component_id)
+            return
         component = self.circuit.components[component_id]
         self.scene.insert_component_for_test(component.kind, parallel_to=component_id)
 
@@ -283,7 +289,11 @@ class MainWindow(QMainWindow):
         if revision != self.circuit.revision:
             return
         first = diagnostics[0]
-        self.status_label.setText(f"⚠ {first.message}")
+        if first.code == "source-short" and not self.circuit.components:
+            message = "Starter loop is a short circuit · place a component on a wire"
+        else:
+            message = first.message
+        self.status_label.setText(f"⚠ {message}")
         self.status_label.setStyleSheet(
             "background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;"
             "padding:10px;border-radius:9px"
@@ -313,7 +323,7 @@ class MainWindow(QMainWindow):
 
     def reset_circuit(self) -> None:
         self._current_path = None
-        self._replace_circuit(Circuit.new(self.source_voltage.value()))
+        self._replace_circuit(Circuit.starter_loop(self.source_voltage.value()))
 
     def _replace_circuit(self, circuit: Circuit) -> None:
         self.circuit = circuit

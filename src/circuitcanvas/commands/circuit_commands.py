@@ -291,6 +291,61 @@ class CircuitCommandStack:
         assert isinstance(result, str)
         return result
 
+    def add_parallel_wired(
+        self,
+        target_component_id: str,
+        kind: ComponentKind | str,
+        value: float,
+        position: Point,
+        rotation: int,
+        route_a: tuple[Point, ...] = (),
+        route_b: tuple[Point, ...] = (),
+    ) -> str:
+        """Create a component and connect both terminals across a target branch."""
+        component_kind = _kind(kind)
+
+        def operation() -> str:
+            if target_component_id not in self.circuit.components:
+                raise KeyError(target_component_id)
+            component_id = self.circuit.next_id(_PREFIX[component_kind])
+            self.circuit.add_component(
+                make_component(
+                    component_kind,
+                    component_id,
+                    f"loose_{component_id}_a",
+                    f"loose_{component_id}_b",
+                    value,
+                )
+            )
+            self.circuit.positions[component_id] = position
+            self.circuit.rotations[component_id] = rotation % 360
+            connections = (
+                (
+                    TerminalRef(target_component_id, "a"),
+                    TerminalRef(component_id, "a"),
+                    route_a,
+                ),
+                (
+                    TerminalRef(target_component_id, "b"),
+                    TerminalRef(component_id, "b"),
+                    route_b,
+                ),
+            )
+            for start, end, route in connections:
+                wire_id = self.circuit.next_wire_id()
+                self.circuit.wires[wire_id] = Wire(
+                    wire_id,
+                    start,
+                    end,
+                    route,
+                )
+            self.circuit.touch()
+            return component_id
+
+        result = self._execute(operation)
+        assert isinstance(result, str)
+        return result
+
     def split_wire(self, wire_id: str, position: Point) -> str:
         def operation() -> str:
             wire = self.circuit.wires[wire_id]
