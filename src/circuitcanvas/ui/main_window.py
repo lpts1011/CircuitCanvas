@@ -35,6 +35,7 @@ from .equation_panel import EquationPanel
 from .export import export_branch_csv, export_scene_png
 from .inspector import ComponentInspector
 from .palette import ComponentPalette
+from .playback import PlaybackController
 from .simulation_controller import SimulationController
 
 
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self.inspector = ComponentInspector()
         self.equations = EquationPanel()
         self.controller = SimulationController(debounce_ms=debounce_ms, parent=self)
+        self.playback = PlaybackController(self)
 
         self._build_toolbar()
         self._build_layout()
@@ -184,6 +186,11 @@ class MainWindow(QMainWindow):
         self.controller.result_ready.connect(self._apply_result)
         self.controller.diagnostics_ready.connect(self._apply_diagnostics)
         self.equations.equation_selected.connect(self.scene.highlight_equation)
+        self.analysis.play_toggled.connect(self.playback.set_playing)
+        self.analysis.speed_changed.connect(self.playback.set_speed)
+        self.playback.playing_changed.connect(self.analysis.set_playing)
+        self.playback.animation_tick.connect(self.scene.advance_arrows)
+        self.playback.time_index_changed.connect(self.analysis.time_slider.setValue)
 
     def add_component(self, kind: str) -> str:
         return self.scene.insert_component_for_test(kind)
@@ -233,6 +240,7 @@ class MainWindow(QMainWindow):
         self.current_result = result
         index = len(result.time) - 1
         self.current_time_index = index
+        self.playback.set_timeline(samples=len(result.time), duration=float(result.time[-1]))
         self.scene.set_result(result, index)
         snapshot = self.circuit.snapshot()
         self.equations.set_report(build_equation_report(snapshot, result, index))
@@ -268,6 +276,7 @@ class MainWindow(QMainWindow):
         )
         self.summary_label.setText("Waiting for a valid closed circuit")
         self.equations.clear()
+        self.playback.set_playing(False)
 
     def _time_index_changed(self, index: int) -> None:
         if self.current_result is not None:

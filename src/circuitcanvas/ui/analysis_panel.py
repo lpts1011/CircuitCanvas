@@ -14,8 +14,10 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtWidgets import (
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSlider,
     QTableView,
     QTabWidget,
@@ -68,6 +70,8 @@ class TransientTableModel(QAbstractTableModel):
 
 class AnalysisPanel(QWidget):
     time_index_changed = Signal(int)
+    play_toggled = Signal(bool)
+    speed_changed = Signal(float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -80,6 +84,16 @@ class AnalysisPanel(QWidget):
         self.metrics.setStyleSheet("color:#64748b")
         top.addWidget(self.title)
         top.addStretch()
+        self.play_button = QPushButton("▶ Play")
+        self.play_button.setCheckable(True)
+        self.speed_control = QDoubleSpinBox()
+        self.speed_control.setRange(0.1, 10.0)
+        self.speed_control.setSingleStep(0.5)
+        self.speed_control.setValue(1.0)
+        self.speed_control.setSuffix("×")
+        self.speed_control.setFixedWidth(75)
+        top.addWidget(self.play_button)
+        top.addWidget(self.speed_control)
         top.addWidget(self.metrics)
         layout.addLayout(top)
 
@@ -118,6 +132,18 @@ class AnalysisPanel(QWidget):
         self.tabs.addTab(self.table, "Data table")
         layout.addWidget(self.tabs)
         self.time_slider.valueChanged.connect(self.time_index_changed.emit)
+        self.play_button.toggled.connect(self._play_toggled)
+        self.speed_control.valueChanged.connect(self.speed_changed.emit)
+
+    def _play_toggled(self, playing: bool) -> None:
+        self.play_button.setText("⏸ Pause" if playing else "▶ Play")
+        self.play_toggled.emit(playing)
+
+    def set_playing(self, playing: bool) -> None:
+        self.play_button.blockSignals(True)
+        self.play_button.setChecked(playing)
+        self.play_button.setText("⏸ Pause" if playing else "▶ Play")
+        self.play_button.blockSignals(False)
 
     def _sync_current_view(self) -> None:
         plot_item = self.plot.getPlotItem()
