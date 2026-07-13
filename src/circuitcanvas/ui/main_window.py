@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QTabWidget,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -23,11 +24,14 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.serialization import CircuitFileError, load_circuit, save_circuit
+from circuitcanvas.solver.equations import build_equation_report
 from circuitcanvas.solver.results import SimulationResult
 from circuitcanvas.solver.validation import Diagnostic
+from circuitcanvas.solver.wire_flow import reconstruct_wire_flows
 
 from .analysis_panel import AnalysisPanel
 from .circuit_scene import CircuitScene, CircuitView
+from .equation_panel import EquationPanel
 from .export import export_branch_csv, export_scene_png
 from .inspector import ComponentInspector
 from .palette import ComponentPalette
@@ -41,6 +45,7 @@ class MainWindow(QMainWindow):
         self.resize(1420, 880)
         self.circuit = Circuit.new(12.0)
         self.current_result: SimulationResult | None = None
+        self.current_time_index = 0
         self._current_path: Path | None = None
 
         self.scene = CircuitScene(self.circuit)
@@ -48,6 +53,7 @@ class MainWindow(QMainWindow):
         self.analysis = AnalysisPanel()
         self.component_palette = ComponentPalette()
         self.inspector = ComponentInspector()
+        self.equations = EquationPanel()
         self.controller = SimulationController(debounce_ms=debounce_ms, parent=self)
 
         self._build_toolbar()
@@ -132,9 +138,12 @@ class MainWindow(QMainWindow):
         self.source_voltage.setSuffix(" V")
         source_row.addWidget(self.source_voltage)
         side.addLayout(source_row)
-        side.addWidget(self.component_palette)
-        side.addWidget(self._separator())
-        side.addWidget(self.inspector)
+        self.sidebar_tabs = QTabWidget()
+        self.sidebar_tabs.addTab(self.component_palette, "Components")
+        self.sidebar_tabs.addTab(self.inspector, "Inspector")
+        self.sidebar_tabs.addTab(self.equations, "Equations")
+        self.sidebar_tabs.setMinimumHeight(460)
+        side.addWidget(self.sidebar_tabs, 1)
         side.addWidget(self._separator())
         summary_heading = QLabel("CIRCUIT SUMMARY")
         summary_heading.setStyleSheet(
@@ -174,6 +183,7 @@ class MainWindow(QMainWindow):
         self.source_voltage.valueChanged.connect(self._source_changed)
         self.controller.result_ready.connect(self._apply_result)
         self.controller.diagnostics_ready.connect(self._apply_diagnostics)
+        self.equations.equation_selected.connect(self.scene.highlight_equation)
 
     def add_component(self, kind: str) -> str:
         return self.scene.insert_component_for_test(kind)
@@ -193,6 +203,7 @@ class MainWindow(QMainWindow):
                 self.current_result.time,
                 self.current_result.branches[component_id],
             )
+        self.equations.reveal_component(component_id)
 
     def _update_value(self, component_id: str, value: float) -> None:
         self.scene.command_stack.update_value(component_id, value)
@@ -221,7 +232,12 @@ class MainWindow(QMainWindow):
             return
         self.current_result = result
         index = len(result.time) - 1
+        self.current_time_index = index
         self.scene.set_result(result, index)
+        snapshot = self.circuit.snapshot()
+        self.equations.set_report(build_equation_report(snapshot, result, index))
+        flows = reconstruct_wire_flows(snapshot, result, index)
+        self.scene.set_wire_currents(dict(flows.currents))
         selected = self.scene.selected_component_id()
         if selected is not None and selected in result.branches:
             self.analysis.set_branch(selected, result.time, result.branches[selected])
@@ -251,10 +267,16 @@ class MainWindow(QMainWindow):
             "padding:10px;border-radius:9px"
         )
         self.summary_label.setText("Waiting for a valid closed circuit")
+        self.equations.clear()
 
     def _time_index_changed(self, index: int) -> None:
         if self.current_result is not None:
+            self.current_time_index = index
             self.scene.set_result(self.current_result, index)
+            snapshot = self.circuit.snapshot()
+            self.equations.set_report(build_equation_report(snapshot, self.current_result, index))
+            flows = reconstruct_wire_flows(snapshot, self.current_result, index)
+            self.scene.set_wire_currents(dict(flows.currents))
 
     def undo(self) -> None:
         if self.scene.command_stack.undo():
@@ -276,6 +298,7 @@ class MainWindow(QMainWindow):
         self.scene.replace_circuit(circuit)
         self.inspector.clear_component()
         self.analysis.clear()
+        self.equations.clear()
         self.source_voltage.blockSignals(True)
         self.source_voltage.setValue(circuit.source.voltage)
         self.source_voltage.blockSignals(False)

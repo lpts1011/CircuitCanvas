@@ -27,6 +27,7 @@ from circuitcanvas.commands.circuit_commands import CircuitCommandStack
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import ComponentKind
 from circuitcanvas.domain.wiring import EndpointRef, JunctionRef, TerminalRef
+from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.results import SimulationResult
 
 from .component_items import BatteryItem, ComponentItem, DropTargetItem
@@ -55,6 +56,7 @@ class CircuitScene(QGraphicsScene):
         self.open_target: DropTargetItem | None = None
         self._wire_start: TerminalRef | None = None
         self._wire_preview: QGraphicsLineItem | None = None
+        self.highlighted_components: set[str] = set()
         self.setSceneRect(QRectF(0, 0, 1200, 620))
         self.selectionChanged.connect(self._selection_updated)
         self.rebuild()
@@ -313,6 +315,14 @@ class CircuitScene(QGraphicsScene):
     def advance_arrows(self, seconds: float) -> None:
         for item in self.wire_items.values():
             item.advance_phase(seconds)
+
+    def highlight_equation(self, line: EquationLine) -> None:
+        self.clearSelection()
+        self.highlighted_components = set(line.component_ids)
+        for component_id in line.component_ids:
+            item = self.component_items.get(component_id)
+            if item is not None:
+                item.setSelected(True)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         item = self.itemAt(event.scenePos(), QTransform())
