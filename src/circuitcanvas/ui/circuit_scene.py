@@ -61,47 +61,62 @@ class CircuitScene(QGraphicsScene):
         selected = self.selected_component_id()
         self.clear()
         self.component_items = {}
-        self.battery_item = BatteryItem(self.circuit.source.voltage)
-        self.battery_item.setPos(90, 270)
-        self.addItem(self.battery_item)
-
-        wire_pen = QPen(QColor("#334155"), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        self.addLine(90, 200, 170, 200, wire_pen)
-        self.addLine(90, 340, 980, 340, wire_pen)
-        self.addLine(980, 200, 980, 340, wire_pen)
-
-        if not self.circuit.components:
-            self.open_target = DropTargetItem()
-            self.open_target.setPos(400, 200)
-            self.addItem(self.open_target)
-            self.addLine(170, 200, 306, 200, wire_pen)
-            self.addLine(494, 200, 980, 200, wire_pen)
-            return
-
-        self.open_target = None
+        top_rail = 200.0
         groups: dict[tuple[str, str], list[str]] = defaultdict(list)
         for component in self.circuit.components.values():
             groups[component.endpoints].append(component.id)
+        max_parallel = max((len(ids) for ids in groups.values()), default=1)
+        bottom_rail = max(340.0, top_rail + (max_parallel - 1) * 112.0 + 120.0)
+        last_group_x = 260.0 + max(0, len(groups) - 1) * 210.0
+        right_rail = max(980.0, last_group_x + 150.0)
+        self.setSceneRect(QRectF(0, 0, right_rail + 180.0, bottom_rail + 140.0))
 
+        self.battery_item = BatteryItem(self.circuit.source.voltage)
+        battery_center = (top_rail + bottom_rail) / 2.0
+        self.battery_item.setPos(90, battery_center)
+        self.addItem(self.battery_item)
+
+        wire_pen = QPen(QColor("#334155"), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        self.addLine(90, top_rail, 170, top_rail, wire_pen)
+        self.addLine(90, bottom_rail, right_rail, bottom_rail, wire_pen)
+        self.addLine(right_rail, top_rail, right_rail, bottom_rail, wire_pen)
+        self.addLine(90, top_rail, 90, battery_center - 70, wire_pen)
+        self.addLine(90, battery_center + 70, 90, bottom_rail, wire_pen)
+
+        if not self.circuit.components:
+            self.open_target = DropTargetItem()
+            self.open_target.setPos(400, top_rail)
+            self.addItem(self.open_target)
+            self.addLine(170, top_rail, 306, top_rail, wire_pen)
+            self.addLine(494, top_rail, right_rail, top_rail, wire_pen)
+            return
+
+        self.open_target = None
         x_positions: list[float] = []
-        for index, (component_id, component) in enumerate(self.circuit.components.items()):
-            siblings = groups[component.endpoints]
-            sibling_index = siblings.index(component_id)
-            x = 260.0 + index * 170.0
-            y = 200.0 + sibling_index * 112.0
+        for group_index, siblings in enumerate(groups.values()):
+            x = 260.0 + group_index * 210.0
             x_positions.append(x)
-            item = ComponentItem(component)
-            item.setPos(x, y)
-            self.addItem(item)
-            self.component_items[component_id] = item
-            self.circuit.positions[component_id] = (x, y)
-            self.addLine(x - 84, y, x - 105, y, wire_pen)
-            self.addLine(x + 84, y, x + 105, y, wire_pen)
+            last_y = top_rail + (len(siblings) - 1) * 112.0
+            if len(siblings) > 1:
+                self.addLine(x - 105, top_rail, x - 105, last_y, wire_pen)
+                self.addLine(x + 105, top_rail, x + 105, last_y, wire_pen)
+            for sibling_index, component_id in enumerate(siblings):
+                component = self.circuit.components[component_id]
+                y = top_rail + sibling_index * 112.0
+                item = ComponentItem(component)
+                item.setPos(x, y)
+                self.addItem(item)
+                self.component_items[component_id] = item
+                self.circuit.positions[component_id] = (x, y)
+                self.addLine(x - 84, y, x - 105, y, wire_pen)
+                self.addLine(x + 84, y, x + 105, y, wire_pen)
 
         first_x = min(x_positions)
         last_x = max(x_positions)
-        self.addLine(170, 200, first_x - 105, 200, wire_pen)
-        self.addLine(last_x + 105, 200, 980, 200, wire_pen)
+        self.addLine(170, top_rail, first_x - 105, top_rail, wire_pen)
+        for left_x, right_x in zip(x_positions, x_positions[1:], strict=False):
+            self.addLine(left_x + 105, top_rail, right_x - 105, top_rail, wire_pen)
+        self.addLine(last_x + 105, top_rail, right_rail, top_rail, wire_pen)
         if selected in self.component_items:
             self.component_items[selected].setSelected(True)
 

@@ -42,3 +42,17 @@ def test_result_updates_component_annotation(qtbot) -> None:
 
     assert "10.000 V" in scene.component_items[resistor].measurement_text
     assert "A" in scene.component_items[resistor].measurement_text
+
+
+def test_canvas_expands_for_many_series_and_parallel_components(qtbot) -> None:
+    scene = CircuitScene(Circuit.new())
+    first = scene.insert_component_for_test("resistor")
+    for _ in range(8):
+        scene.insert_component_for_test("resistor")
+    for _ in range(5):
+        scene.insert_component_for_test("capacitor", parallel_to=first)
+
+    item_bounds = scene.itemsBoundingRect()
+
+    assert scene.sceneRect().right() > item_bounds.right()
+    assert scene.sceneRect().bottom() > item_bounds.bottom()

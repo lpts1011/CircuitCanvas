@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
             toolbar.addAction(action)
         toolbar.addSeparator()
         brand = QLabel("  ⚡ CircuitCanvas")
-        brand.setStyleSheet("font-size:16px;font-weight:700;color:#dbeafe")
+        brand.setStyleSheet("font-size:16px;font-weight:700;color:#dbeafe;background:transparent")
         toolbar.addWidget(brand)
 
     def _build_layout(self) -> None:

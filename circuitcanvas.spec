@@ -1,10 +1,8 @@
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
-
-hiddenimports = collect_submodules("pyqtgraph")
-datas = collect_data_files("pyqtgraph") + [("examples", "examples")]
+hiddenimports = []
+datas = [("examples", "examples")]
 
 a = Analysis(
-    ["src/circuitcanvas/app.py"],
+    ["run_circuitcanvas.py"],
     pathex=["src"],
     binaries=[],
     datas=datas,

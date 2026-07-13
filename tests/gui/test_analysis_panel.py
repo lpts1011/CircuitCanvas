@@ -40,3 +40,11 @@ def test_time_slider_emits_selected_index(qtbot) -> None:
         panel.time_slider.setValue(2)
 
     assert signal.args == [2]
+
+
+def test_current_curve_uses_independent_right_axis(qtbot) -> None:
+    panel = AnalysisPanel()
+    qtbot.addWidget(panel)
+
+    assert panel.plot.getPlotItem().getAxis("right").isVisible()
+    assert panel.current_curve in panel.current_view.addedItems
