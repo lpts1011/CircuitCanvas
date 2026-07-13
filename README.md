@@ -1,8 +1,8 @@
 # CircuitCanvas
 
-**An interactive RLC circuit builder and time-domain simulator.** Drag resistors, capacitors, and inductors into a battery-powered circuit, edit their values, and watch every voltage, current, power, and stored-energy result update automatically.
+**A free-wiring RLC circuit builder and time-domain simulator.** Place resistors, capacitors, and inductors anywhere, wire their terminals into arbitrary linear topologies, and watch the Kirchhoff equations, current direction, voltage, power, and stored energy update automatically.
 
-![CircuitCanvas showing an underdamped RLC transient](docs/images/circuitcanvas-main.png)
+![CircuitCanvas showing a free-wired Kirchhoff analysis](docs/images/circuitcanvas-main.png)
 
 ## Why this project exists
 
@@ -16,10 +16,15 @@ The application does not call an external circuit simulator. Its Python solver a
 
 ## Highlights
 
-- Smart-snap circuit canvas with a battery and expandable series/parallel layout
+- Free-form terminal wiring with explicit junctions and non-connecting wire crossings
+- Movable components, 90° rotation, draggable junctions, and editable wire bends
 - Repeated addition of any practical number of R, C, and L components
 - Direct value entry, SI units, and logarithmic parameter sliders
 - Live voltage and current labels next to every component
+- Animated blue arrows whose direction and speed follow solved wire current
+- Complete KCL, independent KVL-loop, and element-law equations
+- Ordinary numeric equations or the differential MNA/DAE system at any time sample
+- Residual indicators that show whether each displayed Kirchhoff equation balances
 - RC, RL, and RLC transient simulation after every edit
 - Independent voltage and current axes with a shared time cursor
 - Data table for time, voltage, current, power, and stored energy
@@ -45,15 +50,17 @@ On Windows, activate the environment with `.venv\Scripts\activate` before runnin
 
 ## Build a circuit
 
-1. Start with the battery and open drop target.
-2. Drag a component onto the top wire, or click its palette card, to insert it in series.
-3. Drop a component below an existing one to create a parallel branch.
-4. Repeat the operation to add more components; the canvas expands automatically.
-5. Select a component and type a value or move its logarithmic slider.
-6. Drag the time cursor under the graph to inspect all on-canvas values at the same instant.
-7. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result.
+1. Drag any number of components from the **Components** tab onto the canvas.
+2. Drag an orange terminal dot to another terminal to make a connection.
+3. Drop a new wire onto an existing wire to create a real electrical junction. A visual crossing without a junction dot remains disconnected.
+4. Drop a wire on empty canvas to create a movable junction. Shift-drag a junction dot to continue wiring from it.
+5. Drag components and junction dots to reshape the circuit. Drag the square bend handles, or double-click a wire to add another handle.
+6. Select a component and use **Rotate** (or `R`), **Delete**, the value field, or the logarithmic slider.
+7. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation highlights its circuit elements.
+8. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
+9. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result.
 
-Four ready-to-run circuits are included in [`examples/`](examples): resistor, RC charge, RL step, and underdamped RLC.
+Five ready-to-run circuits are included in [`examples/`](examples), including [`parallel-series-17v.json`](examples/parallel-series-17v.json), where a 200 Ω resistor is parallel with a 100 Ω + 100 Ω series branch.
 
 ## Mathematical model
 
@@ -86,7 +93,7 @@ Validation → MNA assembly → transient integration
 Canvas labels + plots + table + exports
 ```
 
-The domain and solver packages have no Qt dependencies, which keeps the numerical core easy to test and reusable. Background results carry the circuit revision that produced them, so a slow older simulation cannot overwrite a newer edit. See [the architecture notes](docs/architecture.md) for module boundaries and data flow.
+The domain and solver packages have no Qt dependencies, which keeps the numerical core easy to test and reusable. Physical connectivity comes only from terminal-to-terminal wires and explicit junctions—not screen proximity. Background results carry the circuit revision that produced them, so a slow older simulation cannot overwrite a newer edit. See [the architecture notes](docs/architecture.md) for module boundaries and data flow.
 
 ## Verify the project
 
@@ -98,7 +105,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 python -m build
 ```
 
-The suite covers domain validation, repeated graph edits, persistence, MNA stamps, analytical transients, conservation residuals, GUI interaction, stale background results, exports, and example circuits.
+The suite covers free graph edits, schema migration, MNA stamps, analytical transients, KCL/KVL residuals, ideal-wire flow reconstruction, GUI interaction, animation, stale background results, exports, and example circuits.
 
 ## Create the macOS application
 
@@ -111,11 +118,12 @@ The source remains Windows-compatible; a Windows executable can be built from th
 
 ## Current scope
 
-Version 1 models one ideal DC source and linear R, C, and L components in circuits constructed through repeated series and parallel operations. It intentionally does not claim support for diodes, transistors, arbitrary freehand wiring, multiple sources, or frequency-domain analysis.
+Version 0.2 models one ideal DC source and arbitrary ideal-wire networks of linear R, C, and L components. It intentionally does not claim support for diodes, transistors, dependent or multiple sources, wire resistance, or frequency-domain analysis.
+
+Current inside a zero-resistance wire loop is not physically unique. CircuitCanvas therefore displays the deterministic minimum-norm wire-flow solution that satisfies every terminal injection and KCL constraint; component currents and all electrical results still come directly from MNA.
 
 The next mathematically coherent extension is a sinusoidal source with impedance, phasors, resonance sweeps, and Bode plots.
 
 ## License
 
 Released under the [MIT License](LICENSE).
-

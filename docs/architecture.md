@@ -6,10 +6,10 @@ CircuitCanvas separates the electrical model, solver, and user interface so each
 
 | Package | Responsibility | Depends on Qt |
 |---|---|---|
-| `domain` | Components, nodes, settings, snapshots, JSON persistence | No |
-| `commands` | Atomic series/parallel/value/delete edits and undo state | No |
-| `solver` | Validation, MNA stamping, time integration, result derivation | No |
-| `ui` | Canvas, dragging, inspection, plotting, export, background work | Yes |
+| `domain` | Components, terminal/junction wiring, settings, snapshots, JSON persistence | No |
+| `commands` | Atomic topology/layout/value edits and complete undo state | No |
+| `solver` | Validation, netlist derivation, MNA, equations, wire flow, integration | No |
+| `ui` | Free canvas, equation browser, animation, plots, export, background work | Yes |
 
 The solver accepts `CircuitSnapshot`, an immutable representation of source, nodes, components, settings, and revision. It never reads coordinates from the graphics scene. The scene refers to components through stable IDs and never treats nearby pixels as electrical connectivity.
 
@@ -23,7 +23,7 @@ sequenceDiagram
     participant Controller as SimulationController
     participant Solver as MNA solver
 
-    User->>UI: Drop component or edit value
+    User->>UI: Place, wire, move, rotate, or edit
     UI->>Graph: Execute atomic command
     Graph-->>UI: New revision and snapshot
     UI->>Controller: Request(revision, snapshot)
@@ -35,16 +35,27 @@ sequenceDiagram
     UI-->>User: Update labels, plots, table, totals
 ```
 
-## Circuit construction
+## Physical wiring and electrical connectivity
 
-The public interaction model is deliberately narrower than the internal graph:
+Every component and the battery expose two stable terminal references. A wire joins two terminal or junction references and may carry any number of visual route points. A union-find pass collapses each connected ideal-wire set into one solver node when an immutable snapshot is created.
 
-- an initial drop closes the battery loop;
-- a series insertion splits a component edge with a new node;
-- a parallel insertion reuses an existing component's endpoint nodes; and
-- operations may be repeated without a fixed component count.
+This separation makes the rules unambiguous:
 
-This produces useful series-parallel networks while avoiding ambiguous freehand connections. The canvas groups equal endpoint pairs vertically as parallel branches and lays distinct endpoint groups horizontally. Its scene rectangle expands in both directions for large networks.
+- moving a component or a bend changes only layout;
+- crossing wire paths do not connect;
+- dropping on a wire splits it with an explicit junction;
+- multiple branches may share either terminal, so arbitrary series/parallel combinations are natural; and
+- solver connectivity never depends on pixel distance.
+
+All topology and layout edits are stored by `CircuitCommandStack`, so undo/redo restores components, rotations, junctions, routes, and counters together.
+
+## Kirchhoff presentation layer
+
+After MNA solves the immutable graph, the equation builder enumerates every non-ground KCL equation, a multigraph fundamental-cycle basis for independent KVL equations, and the R/C/L constitutive laws. Each row carries symbolic text, substituted values, a residual, and the involved IDs so the equation panel can highlight the canvas.
+
+The differential view exposes the same circuit as `C x_dot(t) + G x(t) = b(t)` together with the exact unknown vector and matrices used by the numerical solver.
+
+The wire-flow layer solves the ideal-conductor incidence system `Bf = -q` with a deterministic minimum-norm solution. This supplies KCL-consistent animation arrows without pretending that current distribution around a zero-resistance wire-only loop is uniquely measurable.
 
 ## Background simulation
 
@@ -63,7 +74,6 @@ Arrays become read-only when the result is created. Presentation widgets therefo
 
 ## Persistence
 
-The JSON file contains a schema version, source, components, nodes, positions, simulation settings, and open-edge state. Computed arrays are not saved because they can be reproduced from the authoritative circuit.
+Schema version 2 stores source, components, positions, rotations, terminal/junction endpoints, wire routes, and simulation settings. Schema-1 series/parallel files are migrated by synthesizing explicit junction wiring. Computed arrays are not saved because they can be reproduced from the authoritative circuit.
 
 Unsupported schema versions and malformed files raise `CircuitFileError` with an actionable message. Stable component IDs and layout coordinates survive a round trip.
-

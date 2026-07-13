@@ -29,6 +29,22 @@ S(a,b,y)=
 
 Ground-node rows and columns are omitted rather than inserted as zero equations.
 
+## Kirchhoff equations shown in the UI
+
+For every non-reference node, CircuitCanvas reports KCL using signed branch currents:
+
+\[
+\sum_{e\in\delta(n)} s_{n,e} i_e(t)=0.
+\]
+
+It builds a fundamental cycle basis on the component multigraph and reports one independent KVL equation per cycle:
+
+\[
+\sum_{e\in\mathcal{C}} s_{\mathcal{C},e} v_e(t)=0.
+\]
+
+Parallel edges are preserved, so a two-edge loop is represented correctly. Every equation shows its symbolic form, signed numeric substitution at the selected time, and the computed residual. The differential view prints the R/C/L constitutive equations and the exact MNA descriptor matrices.
+
 ## Time integration
 
 The battery is treated as a step from 0 V to the configured value. With a fixed step \(\Delta t\), the implicit trapezoidal update is
@@ -69,6 +85,18 @@ E_L=\frac{1}{2}Li_L^2.
 \]
 
 The source current uses the MNA auxiliary-current direction. A negative source power means the battery is delivering energy to the network; the user-facing summary reports delivered magnitude.
+
+## Current arrows on ideal wires
+
+MNA solves branch currents through physical elements, not an arbitrary current for every zero-resistance drawing segment. CircuitCanvas converts those solved terminal currents into wire arrows by solving
+
+\[
+Bf=-q,
+\]
+
+where `B` is the oriented incidence matrix of each connected wire network, `q` is the vector of solved terminal injections, and `f` contains displayed wire currents. The least-norm solution is deterministic and satisfies KCL at every junction. Its residual is tested independently.
+
+The arrow direction follows the sign of `f`; speed increases logarithmically with magnitude and arrows stop when the current is numerically zero or the simulation result is stale. In a closed loop made only of ideal wire, several segment-current assignments are physically equivalent, so the least-norm result is a visualization convention rather than an extra physical claim.
 
 ## Analytical verification
 
