@@ -32,4 +32,3 @@ def test_controller_reports_validation_without_starting_solver(qtbot) -> None:
         controller.request(circuit.revision, circuit.snapshot())
 
     assert signal.args[1][0].code == "open-circuit"
-

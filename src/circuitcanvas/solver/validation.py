@@ -62,4 +62,3 @@ def validate(snapshot: CircuitSnapshot) -> tuple[Diagnostic, ...]:
             ),
         )
     return ()
-

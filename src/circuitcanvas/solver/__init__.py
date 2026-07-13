@@ -3,4 +3,3 @@
 from .validation import Diagnostic, validate
 
 __all__ = ["Diagnostic", "validate"]
-

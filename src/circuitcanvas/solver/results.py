@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
 
 import numpy as np
 from numpy.typing import NDArray
@@ -56,4 +56,3 @@ class SimulationResult:
             kcl_residual,
             MappingProxyType(metrics),
         )
-

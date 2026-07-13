@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from enum import Enum
-from typing import TypeAlias
+from enum import StrEnum
 
 
-class ComponentKind(str, Enum):
+class ComponentKind(StrEnum):
     RESISTOR = "resistor"
     CAPACITOR = "capacitor"
     INDUCTOR = "inductor"
@@ -116,7 +115,7 @@ class Inductor:
         return replace(self, node_a=node_a, node_b=node_b)
 
 
-Component: TypeAlias = Resistor | Capacitor | Inductor
+type Component = Resistor | Capacitor | Inductor
 
 
 def make_component(
@@ -135,4 +134,3 @@ def replace_value(component: Component, value: float) -> Component:
     if isinstance(component, Capacitor):
         return replace(component, capacitance=value)
     return replace(component, inductance=value)
-

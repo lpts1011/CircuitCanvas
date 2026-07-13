@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QSplitter,
     QToolBar,
     QVBoxLayout,
@@ -25,9 +24,11 @@ from PySide6.QtWidgets import (
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.serialization import CircuitFileError, load_circuit, save_circuit
 from circuitcanvas.solver.results import SimulationResult
+from circuitcanvas.solver.validation import Diagnostic
 
 from .analysis_panel import AnalysisPanel
 from .circuit_scene import CircuitScene, CircuitView
+from .export import export_branch_csv, export_scene_png
 from .inspector import ComponentInspector
 from .palette import ComponentPalette
 from .simulation_controller import SimulationController
@@ -45,7 +46,7 @@ class MainWindow(QMainWindow):
         self.scene = CircuitScene(self.circuit)
         self.view = CircuitView(self.scene)
         self.analysis = AnalysisPanel()
-        self.palette = ComponentPalette()
+        self.component_palette = ComponentPalette()
         self.inspector = ComponentInspector()
         self.controller = SimulationController(debounce_ms=debounce_ms, parent=self)
 
@@ -75,7 +76,19 @@ class MainWindow(QMainWindow):
         redo_action = QAction("Redo", self)
         redo_action.setShortcut(QKeySequence.StandardKey.Redo)
         redo_action.triggered.connect(self.redo)
-        for action in (new_action, open_action, save_action, undo_action, redo_action):
+        image_action = QAction("Export PNG", self)
+        image_action.triggered.connect(self.export_png)
+        data_action = QAction("Export CSV", self)
+        data_action.triggered.connect(self.export_csv)
+        for action in (
+            new_action,
+            open_action,
+            save_action,
+            undo_action,
+            redo_action,
+            image_action,
+            data_action,
+        ):
             toolbar.addAction(action)
         toolbar.addSeparator()
         brand = QLabel("  ⚡ CircuitCanvas")
@@ -106,7 +119,9 @@ class MainWindow(QMainWindow):
         side.setSpacing(18)
 
         source_heading = QLabel("DC SOURCE")
-        source_heading.setStyleSheet("font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px")
+        source_heading.setStyleSheet(
+            "font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px"
+        )
         side.addWidget(source_heading)
         source_row = QHBoxLayout()
         source_row.addWidget(QLabel("Battery voltage"))
@@ -117,12 +132,14 @@ class MainWindow(QMainWindow):
         self.source_voltage.setSuffix(" V")
         source_row.addWidget(self.source_voltage)
         side.addLayout(source_row)
-        side.addWidget(self.palette)
+        side.addWidget(self.component_palette)
         side.addWidget(self._separator())
         side.addWidget(self.inspector)
         side.addWidget(self._separator())
         summary_heading = QLabel("CIRCUIT SUMMARY")
-        summary_heading.setStyleSheet("font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px")
+        summary_heading.setStyleSheet(
+            "font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px"
+        )
         side.addWidget(summary_heading)
         self.summary_label = QLabel("Waiting for a complete circuit")
         self.summary_label.setWordWrap(True)
@@ -147,7 +164,7 @@ class MainWindow(QMainWindow):
         return line
 
     def _connect_signals(self) -> None:
-        self.palette.component_clicked.connect(self.add_component)
+        self.component_palette.component_clicked.connect(self.add_component)
         self.scene.circuit_changed.connect(self._circuit_changed)
         self.scene.selection_changed.connect(self._selection_changed)
         self.inspector.value_changed.connect(self._update_value)
@@ -220,16 +237,18 @@ class MainWindow(QMainWindow):
         )
         self.status_label.setText("✓ Circuit valid · transient solution converged")
         self.status_label.setStyleSheet(
-            "background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;padding:10px;border-radius:9px"
+            "background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;"
+            "padding:10px;border-radius:9px"
         )
 
-    def _apply_diagnostics(self, revision: int, diagnostics: object) -> None:
+    def _apply_diagnostics(self, revision: int, diagnostics: tuple[Diagnostic, ...]) -> None:
         if revision != self.circuit.revision:
             return
         first = diagnostics[0]
         self.status_label.setText(f"⚠ {first.message}")
         self.status_label.setStyleSheet(
-            "background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;padding:10px;border-radius:9px"
+            "background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;"
+            "padding:10px;border-radius:9px"
         )
         self.summary_label.setText("Waiting for a valid closed circuit")
 
@@ -288,3 +307,24 @@ class MainWindow(QMainWindow):
         self._current_path = Path(filename)
         self._replace_circuit(circuit)
 
+    def export_png(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export circuit image", "circuit.png", "PNG image (*.png)"
+        )
+        if filename:
+            export_scene_png(filename, self.scene)
+
+    def export_csv(self) -> None:
+        selected = self.scene.selected_component_id()
+        if self.current_result is None or selected is None:
+            QMessageBox.information(
+                self,
+                "Select a component",
+                "Select a component with a valid simulation result before exporting data.",
+            )
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export transient data", f"{selected}.csv", "CSV data (*.csv)"
+        )
+        if filename:
+            export_branch_csv(filename, self.current_result, selected)

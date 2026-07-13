@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
+from PySide6.QtCore import QObject, QRect, QRectF, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QPainter,
+    QPen,
+    QWheelEvent,
+)
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QWidget
 
 from circuitcanvas.commands.circuit_commands import CircuitCommandStack
 from circuitcanvas.domain.circuit import Circuit
@@ -26,7 +34,7 @@ class CircuitScene(QGraphicsScene):
     circuit_changed = Signal(int)
     selection_changed = Signal(str)
 
-    def __init__(self, circuit: Circuit, parent=None) -> None:
+    def __init__(self, circuit: Circuit, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.circuit = circuit
         self.command_stack = CircuitCommandStack(circuit)
@@ -37,16 +45,17 @@ class CircuitScene(QGraphicsScene):
         self.selectionChanged.connect(self._selection_updated)
         self.rebuild()
 
-    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
-        painter.fillRect(rect, QColor("#f8fafc"))
+    def drawBackground(self, painter: QPainter, rect: QRectF | QRect) -> None:
+        rect_f = QRectF(rect)
+        painter.fillRect(rect_f, QColor("#f8fafc"))
         painter.setPen(QPen(QColor("#e5eaf1"), 1))
         spacing = 24
-        left = int(rect.left()) - int(rect.left()) % spacing
-        top = int(rect.top()) - int(rect.top()) % spacing
-        for x in range(left, int(rect.right()) + spacing, spacing):
-            painter.drawLine(x, int(rect.top()), x, int(rect.bottom()))
-        for y in range(top, int(rect.bottom()) + spacing, spacing):
-            painter.drawLine(int(rect.left()), y, int(rect.right()), y)
+        left = int(rect_f.left()) - int(rect_f.left()) % spacing
+        top = int(rect_f.top()) - int(rect_f.top()) % spacing
+        for x in range(left, int(rect_f.right()) + spacing, spacing):
+            painter.drawLine(x, int(rect_f.top()), x, int(rect_f.bottom()))
+        for y in range(top, int(rect_f.bottom()) + spacing, spacing):
+            painter.drawLine(int(rect_f.left()), y, int(rect_f.right()), y)
 
     def rebuild(self) -> None:
         selected = self.selected_component_id()
@@ -143,34 +152,35 @@ class CircuitScene(QGraphicsScene):
 class CircuitView(QGraphicsView):
     """Zoomable view that accepts component MIME drops."""
 
-    def __init__(self, scene: CircuitScene, parent=None) -> None:
+    def __init__(self, scene: CircuitScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
         self.setAcceptDrops(True)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
 
-    def wheelEvent(self, event) -> None:
+    def wheelEvent(self, event: QWheelEvent) -> None:
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         self.scale(factor, factor)
 
-    def dragEnterEvent(self, event) -> None:
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasFormat("application/x-circuitcanvas-component"):
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
-    def dragMoveEvent(self, event) -> None:
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if event.mimeData().hasFormat("application/x-circuitcanvas-component"):
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
-    def dropEvent(self, event) -> None:
+    def dropEvent(self, event: QDropEvent) -> None:
         if not event.mimeData().hasFormat("application/x-circuitcanvas-component"):
             super().dropEvent(event)
             return
-        kind = bytes(event.mimeData().data("application/x-circuitcanvas-component")).decode()
+        payload = event.mimeData().data("application/x-circuitcanvas-component").data()
+        kind = bytes(payload).decode()
         scene = self.scene()
         assert isinstance(scene, CircuitScene)
         scene_pos = self.mapToScene(event.position().toPoint())

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .circuit import Circuit, SimulationSettings
 from .components import ComponentKind, VoltageSource, make_component
@@ -51,7 +52,8 @@ def circuit_from_dict(payload: Mapping[str, Any]) -> Circuit:
     version = payload.get("schema_version")
     if version != SCHEMA_VERSION:
         raise CircuitFileError(
-            f"Circuit file uses schema version {version}; this app supports version {SCHEMA_VERSION}."
+            f"Circuit file uses schema version {version}; "
+            f"this app supports version {SCHEMA_VERSION}."
         )
     try:
         source_data = payload["source"]
@@ -84,9 +86,7 @@ def circuit_from_dict(payload: Mapping[str, Any]) -> Circuit:
             prefix = component.id[:1]
             suffix = component.id[1:]
             if suffix.isdigit():
-                circuit._id_counters[prefix] = max(
-                    circuit._id_counters.get(prefix, 0), int(suffix)
-                )
+                circuit._id_counters[prefix] = max(circuit._id_counters.get(prefix, 0), int(suffix))
         circuit.positions = {
             str(key): (float(value[0]), float(value[1]))
             for key, value in payload.get("positions", {}).items()

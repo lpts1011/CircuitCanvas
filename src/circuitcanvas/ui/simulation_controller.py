@@ -97,4 +97,3 @@ class SimulationController(QObject):
 
     def _discard_finished_workers(self, revision: int) -> None:
         self._workers = {worker for worker in self._workers if worker.revision != revision}
-

@@ -27,7 +27,10 @@ def test_parallel_drop_reuses_selected_component_endpoints(qtbot) -> None:
     resistor = scene.insert_component_for_test("resistor")
     capacitor = scene.insert_component_for_test("capacitor", parallel_to=resistor)
 
-    assert scene.circuit.components[resistor].endpoints == scene.circuit.components[capacitor].endpoints
+    assert (
+        scene.circuit.components[resistor].endpoints
+        == scene.circuit.components[capacitor].endpoints
+    )
 
 
 def test_result_updates_component_annotation(qtbot) -> None:

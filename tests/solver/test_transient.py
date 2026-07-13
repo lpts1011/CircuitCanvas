@@ -35,9 +35,7 @@ def test_resistor_result_obeys_ohms_law_after_step() -> None:
 
 
 def test_rc_step_matches_analytic_curve() -> None:
-    circuit = _series_circuit(
-        [(ComponentKind.RESISTOR, 1_000.0), (ComponentKind.CAPACITOR, 10e-6)]
-    )
+    circuit = _series_circuit([(ComponentKind.RESISTOR, 1_000.0), (ComponentKind.CAPACITOR, 10e-6)])
 
     result = simulate(circuit.snapshot())
     expected = 5.0 * (1.0 - np.exp(-result.time / 0.01))
@@ -75,4 +73,3 @@ def test_backward_euler_is_available_and_finite() -> None:
 
     assert np.isfinite(result.state).all()
     assert result.metrics["peak_current_a"] > 0
-

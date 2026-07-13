@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.linalg import LinAlgError, lu_factor, lu_solve
+from scipy.linalg import LinAlgError, lu_factor, lu_solve  # type: ignore[import-untyped]
 
 from circuitcanvas.domain.circuit import CircuitSnapshot
-from circuitcanvas.domain.components import Capacitor, Inductor, Resistor
+from circuitcanvas.domain.components import Capacitor, Resistor
 
 from .mna import MNASystem, assemble
 from .results import BranchResult, SimulationResult
@@ -24,7 +24,9 @@ def _node_voltage(system: MNASystem, state: np.ndarray, node: str) -> np.ndarray
     return state[:, index]
 
 
-def _solve_state(snapshot: CircuitSnapshot, system: MNASystem) -> tuple[np.ndarray, np.ndarray]:
+def _solve_state(
+    snapshot: CircuitSnapshot, system: MNASystem
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     settings = snapshot.settings
     time = np.linspace(0.0, settings.duration, settings.samples, dtype=float)
     dt = float(time[1] - time[0])
@@ -82,10 +84,7 @@ def simulate(snapshot: CircuitSnapshot) -> SimulationResult:
     system = assemble(snapshot)
     time, state, residual = _solve_state(snapshot, system)
     dt = float(time[1] - time[0])
-    node_voltages = {
-        node: _node_voltage(system, state, node)
-        for node in snapshot.nodes
-    }
+    node_voltages = {node: _node_voltage(system, state, node) for node in snapshot.nodes}
     branches: dict[str, BranchResult] = {}
 
     for component in snapshot.components:

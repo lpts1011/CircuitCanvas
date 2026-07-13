@@ -27,4 +27,3 @@ def test_disconnected_component_is_identified() -> None:
 
     assert diagnostics[0].code == "floating-subcircuit"
     assert diagnostics[0].component_ids == ("R2",)
-

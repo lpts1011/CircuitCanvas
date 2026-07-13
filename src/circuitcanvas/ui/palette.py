@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class DraggableComponentButton(QPushButton):
-    def __init__(self, title: str, kind: str, accent: str, parent=None) -> None:
+    def __init__(self, title: str, kind: str, accent: str, parent: QWidget | None = None) -> None:
         super().__init__(title, parent)
         self.kind = kind
         self._press_position = QPoint()
@@ -38,7 +38,7 @@ class DraggableComponentButton(QPushButton):
 class ComponentPalette(QWidget):
     component_clicked = Signal(str)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -51,9 +51,13 @@ class ComponentPalette(QWidget):
             ("∿  Inductor", "inductor", "#ddd6fe"),
         ):
             button = DraggableComponentButton(title, kind, accent)
-            button.clicked.connect(lambda checked=False, value=kind: self.component_clicked.emit(value))
+            button.clicked.connect(
+                lambda checked=False, value=kind: self.component_clicked.emit(value)
+            )
             layout.addWidget(button)
-        hint = QLabel("Drag onto the wire for series.\nDrop below a component for a parallel branch.")
+        hint = QLabel(
+            "Drag onto the wire for series.\nDrop below a component for a parallel branch."
+        )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#64748b;font-size:11px;margin-top:6px")
         layout.addWidget(hint)

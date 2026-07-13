@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
-import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+import pyqtgraph as pg  # type: ignore[import-untyped]
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QPersistentModelIndex,
+    Qt,
+    Signal,
+)
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -16,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from circuitcanvas.solver.results import BranchResult
+
+_INVALID_INDEX = QModelIndex()
 
 
 class TransientTableModel(QAbstractTableModel):
@@ -30,27 +40,36 @@ class TransientTableModel(QAbstractTableModel):
         self._columns = [time, branch.voltage, branch.current, branch.power, branch.energy]
         self.endResetModel()
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = _INVALID_INDEX) -> int:
         return 0 if parent.isValid() else len(self._columns[0])
 
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def columnCount(self, parent: QModelIndex | QPersistentModelIndex = _INVALID_INDEX) -> int:
         return 0 if parent.isValid() else len(self.HEADERS)
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+    def data(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> object | None:
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
             return None
         return f"{float(self._columns[index.column()][index.row()]):.6g}"
 
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> object | None:
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return self.HEADERS[section]
-        return super().headerData(section, orientation, role)
+        return cast(object, super().headerData(section, orientation, role))
 
 
 class AnalysisPanel(QWidget):
     time_index_changed = Signal(int)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

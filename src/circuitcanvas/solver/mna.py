@@ -89,15 +89,15 @@ def assemble(snapshot: CircuitSnapshot) -> MNASystem:
                 component.capacitance,
             )
         else:
-            _stamp_incidence(
-                g, node_indices, component.node_a, component.node_b, next_aux
-            )
+            _stamp_incidence(g, node_indices, component.node_a, component.node_b, next_aux)
             c[next_aux, next_aux] -= component.inductance
             component_aux_indices[component.id] = next_aux
             next_aux += 1
 
-    unknowns = tuple(node_names) + (f"I({snapshot.source.id})",) + tuple(
-        f"I({component.id})" for component in inductors
+    unknowns = (
+        tuple(node_names)
+        + (f"I({snapshot.source.id})",)
+        + tuple(f"I({component.id})" for component in inductors)
     )
     return MNASystem(
         g,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Callable
 
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import (
@@ -136,9 +136,7 @@ class CircuitCommandStack:
     def add_parallel(
         self, target_component_id: str, kind: ComponentKind | str, value: float
     ) -> str:
-        result = self._execute(
-            lambda: add_parallel(self.circuit, target_component_id, kind, value)
-        )
+        result = self._execute(lambda: add_parallel(self.circuit, target_component_id, kind, value))
         assert isinstance(result, str)
         return result
 

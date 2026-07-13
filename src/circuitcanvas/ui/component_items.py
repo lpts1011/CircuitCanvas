@@ -29,7 +29,9 @@ class BatteryItem(QGraphicsObject):
         painter.drawLine(QPointF(0, 16), QPointF(0, 70))
         painter.setPen(QColor("#1e3a8a"))
         painter.setFont(QFont("Arial", 10, QFont.Weight.DemiBold))
-        painter.drawText(QRectF(-42, -48, 84, 20), Qt.AlignmentFlag.AlignCenter, f"{self.voltage:g} V")
+        painter.drawText(
+            QRectF(-42, -48, 84, 20), Qt.AlignmentFlag.AlignCenter, f"{self.voltage:g} V"
+        )
         painter.drawText(QRectF(-38, -7, 16, 16), Qt.AlignmentFlag.AlignCenter, "+")
         painter.drawText(QRectF(-38, 20, 16, 16), Qt.AlignmentFlag.AlignCenter, "−")
 
@@ -85,7 +87,18 @@ class ComponentItem(QGraphicsObject):
             painter.drawPath(path)
         else:
             path = QPainterPath(QPointF(-62, 0))
-            points = [(-50, 0), (-42, -12), (-28, 12), (-14, -12), (0, 12), (14, -12), (28, 12), (42, -12), (50, 0), (62, 0)]
+            points = [
+                (-50, 0),
+                (-42, -12),
+                (-28, 12),
+                (-14, -12),
+                (0, 12),
+                (14, -12),
+                (28, 12),
+                (42, -12),
+                (50, 0),
+                (62, 0),
+            ]
             for x, y in points:
                 path.lineTo(x, y)
             painter.drawPath(path)
@@ -111,7 +124,9 @@ class ComponentItem(QGraphicsObject):
         painter.drawText(QRectF(-78, -44, 156, 20), Qt.AlignmentFlag.AlignCenter, self._title())
         painter.setPen(QColor("#475569"))
         painter.setFont(QFont("Arial", 8))
-        painter.drawText(QRectF(-80, 25, 160, 18), Qt.AlignmentFlag.AlignCenter, self.measurement_text)
+        painter.drawText(
+            QRectF(-80, 25, 160, 18), Qt.AlignmentFlag.AlignCenter, self.measurement_text
+        )
 
     def _title(self) -> str:
         value = self.component.value
@@ -120,4 +135,3 @@ class ComponentItem(QGraphicsObject):
         if isinstance(self.component, Inductor):
             return f"{self.component.id} · {value * 1e3:g} mH"
         return f"{self.component.id} · {value:g} Ω"
-

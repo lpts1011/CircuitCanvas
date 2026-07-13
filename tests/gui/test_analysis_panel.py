@@ -24,7 +24,9 @@ def test_plot_and_table_use_the_same_samples(qtbot) -> None:
     np.testing.assert_allclose(voltage, branch.voltage)
     np.testing.assert_allclose(current_x, time)
     np.testing.assert_allclose(current, branch.current)
-    assert panel.table_model.data(panel.table_model.index(3, 1), Qt.ItemDataRole.DisplayRole) == "3.75"
+    assert (
+        panel.table_model.data(panel.table_model.index(3, 1), Qt.ItemDataRole.DisplayRole) == "3.75"
+    )
 
 
 def test_time_slider_emits_selected_index(qtbot) -> None:

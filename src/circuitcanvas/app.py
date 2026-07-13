@@ -10,7 +10,8 @@ from .ui.main_window import MainWindow
 
 
 def main() -> int:
-    app = QApplication.instance() or QApplication(sys.argv)
+    instance = QApplication.instance()
+    app = instance if isinstance(instance, QApplication) else QApplication(sys.argv)
     app.setApplicationName("CircuitCanvas")
     app.setOrganizationName("Peichi Li")
     app.setStyle("Fusion")
@@ -21,8 +22,14 @@ def main() -> int:
         QToolButton { color:#e2e8f0; padding:7px 10px; border-radius:7px; }
         QToolButton:hover { background:#2a3853; }
         #sidebar { background:white; border-left:1px solid #dbe2ea; }
-        QLineEdit, QComboBox, QDoubleSpinBox { background:white; border:1px solid #cbd5e1; border-radius:7px; padding:7px; }
-        QPushButton { background:white; border:1px solid #cbd5e1; border-radius:7px; padding:8px; }
+        QLineEdit, QComboBox, QDoubleSpinBox {
+            background:white; border:1px solid #cbd5e1;
+            border-radius:7px; padding:7px;
+        }
+        QPushButton {
+            background:white; border:1px solid #cbd5e1;
+            border-radius:7px; padding:8px;
+        }
         QPushButton:hover { background:#f1f5f9; }
         QTabWidget::pane { border:1px solid #e2e8f0; background:white; }
         QTabBar::tab { padding:7px 14px; background:#f1f5f9; }

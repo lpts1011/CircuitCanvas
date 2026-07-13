@@ -38,7 +38,7 @@ class ComponentInspector(QWidget):
     rotate_requested = Signal(str)
     parallel_requested = Signal(str)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.component: Component | None = None
         self._si_value = 0.0
@@ -46,7 +46,9 @@ class ComponentInspector(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.heading = QLabel("SELECT A COMPONENT")
-        self.heading.setStyleSheet("font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px")
+        self.heading.setStyleSheet(
+            "font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px"
+        )
         layout.addWidget(self.heading)
 
         form = QFormLayout()
@@ -97,7 +99,7 @@ class ComponentInspector(QWidget):
         units = _UNITS[component.kind.value]
         self.unit_combo.blockSignals(True)
         self.unit_combo.clear()
-        self.unit_combo.addItems(units)
+        self.unit_combo.addItems(list(units))
         preferred = self._preferred_unit(component)
         self.unit_combo.setCurrentText(preferred)
         self.unit_combo.blockSignals(False)
@@ -164,7 +166,9 @@ class ComponentInspector(QWidget):
             return
         low, high = _RANGES[self.component.kind.value]
         clipped = min(high, max(low, self._si_value))
-        position = round(1000 * (math.log10(clipped) - math.log10(low)) / (math.log10(high) - math.log10(low)))
+        position = round(
+            1000 * (math.log10(clipped) - math.log10(low)) / (math.log10(high) - math.log10(low))
+        )
         self.slider.blockSignals(True)
         self.slider.setValue(position)
         self.slider.blockSignals(False)
@@ -189,4 +193,3 @@ class ComponentInspector(QWidget):
     def _parallel(self) -> None:
         if self.component is not None:
             self.parallel_requested.emit(self.component.id)
-

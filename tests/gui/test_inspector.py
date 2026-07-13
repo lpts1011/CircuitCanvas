@@ -37,4 +37,3 @@ def test_delete_signal_carries_selected_id(qtbot) -> None:
         inspector.delete_button.click()
 
     assert signal.args == ["R1"]
-
