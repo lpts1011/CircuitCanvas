@@ -1,8 +1,11 @@
 # CircuitCanvas Design Specification
 
-**Date:** 2026-07-13  
-**Working title:** CircuitCanvas — Interactive RLC Circuit Simulator  
-**Technology:** Python 3.12+, PySide6, NumPy, SciPy, PyQtGraph  
+**Date:** 2026-07-13
+
+**Working title:** CircuitCanvas — Interactive RLC Circuit Simulator
+
+**Technology:** Python 3.12+, PySide6, NumPy, SciPy, PyQtGraph
+
 **Primary platform:** macOS desktop, with Windows-compatible code and packaging
 
 ## 1. Product purpose
