@@ -8,7 +8,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 
-from circuitcanvas.commands.circuit_commands import add_parallel, insert_series
+from circuitcanvas.commands.circuit_commands import CircuitCommandStack
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import ComponentKind
 from circuitcanvas.solver.results import SimulationResult
@@ -29,6 +29,7 @@ class CircuitScene(QGraphicsScene):
     def __init__(self, circuit: Circuit, parent=None) -> None:
         super().__init__(parent)
         self.circuit = circuit
+        self.command_stack = CircuitCommandStack(circuit)
         self.component_items: dict[str, ComponentItem] = {}
         self.battery_item: BatteryItem | None = None
         self.open_target: DropTargetItem | None = None
@@ -111,15 +112,15 @@ class CircuitScene(QGraphicsScene):
     ) -> str:
         component_kind = kind if isinstance(kind, ComponentKind) else ComponentKind(kind)
         if parallel_to is not None:
-            component_id = add_parallel(
-                self.circuit, parallel_to, component_kind, DEFAULT_VALUES[component_kind]
+            component_id = self.command_stack.add_parallel(
+                parallel_to, component_kind, DEFAULT_VALUES[component_kind]
             )
         else:
             target = self.circuit.open_edge
             if target is None:
                 target = next(reversed(self.circuit.components))
-            component_id = insert_series(
-                self.circuit, target, component_kind, DEFAULT_VALUES[component_kind]
+            component_id = self.command_stack.insert_series(
+                target, component_kind, DEFAULT_VALUES[component_kind]
             )
         self.rebuild()
         self.component_items[component_id].setSelected(True)
@@ -135,6 +136,7 @@ class CircuitScene(QGraphicsScene):
 
     def replace_circuit(self, circuit: Circuit) -> None:
         self.circuit = circuit
+        self.command_stack = CircuitCommandStack(circuit)
         self.rebuild()
 
 
@@ -182,4 +184,3 @@ class CircuitView(QGraphicsView):
             parallel_to = nearest.component.id
         scene.insert_component_for_test(kind, parallel_to=parallel_to)
         event.acceptProposedAction()
-
