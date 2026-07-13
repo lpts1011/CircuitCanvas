@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from scipy.linalg import lstsq  # type: ignore[import-untyped]
 
 from circuitcanvas.domain.circuit import CircuitSnapshot
+from circuitcanvas.domain.components import Capacitor
 from circuitcanvas.domain.wiring import EndpointRef, TerminalRef, Wire
 
 from .results import SimulationResult
@@ -25,13 +26,26 @@ class WireFlowResult:
 def _terminal_injections(
     snapshot: CircuitSnapshot, result: SimulationResult, index: int
 ) -> dict[TerminalRef, float]:
-    source_current = float(result.source_current[index])
+    previous = max(0, index - 1)
+    use_midpoint = snapshot.settings.method == "trapezoidal" and index > 0
+
+    def algebraic_value(values: NDArray[np.float64]) -> float:
+        if use_midpoint:
+            return float(values[index] + values[previous]) / 2.0
+        return float(values[index])
+
+    source_current = algebraic_value(result.source_current)
     injections = {
         TerminalRef(snapshot.source.id, "a"): -source_current,
         TerminalRef(snapshot.source.id, "b"): source_current,
     }
     for component in snapshot.components:
-        current = float(result.branches[component.id].current[index])
+        branch_current = result.branches[component.id].current
+        current = (
+            float(branch_current[index])
+            if isinstance(component, Capacitor)
+            else algebraic_value(branch_current)
+        )
         injections[TerminalRef(component.id, "a")] = -current
         injections[TerminalRef(component.id, "b")] = current
     return injections

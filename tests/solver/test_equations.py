@@ -42,3 +42,10 @@ def test_differential_report_expands_reactive_laws_and_mna() -> None:
     assert "L1·di_L1/dt" in report.differential_text
     assert "C x_dot(t) + G x(t) = b(t)" in report.descriptor_text
     assert "Differential-algebraic MNA system" in report.descriptor_text
+    assert max(abs(line.residual) for line in report.kcl) < 1e-9
+    inductor_law = next(line for line in report.laws if line.id == "LAW-L1")
+    assert abs(inductor_law.residual) < 1e-9
+    assert "A/s" in inductor_law.substituted
+
+    initial_report = build_equation_report(snapshot, simulate(snapshot), 0)
+    assert max(abs(line.residual) for line in (*initial_report.kcl, *initial_report.laws)) < 1e-9

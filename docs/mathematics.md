@@ -61,6 +61,8 @@ The left-hand matrix remains constant for a linear circuit and fixed time step, 
 =\frac{C}{\Delta t}x_k+b_{k+1}.
 \]
 
+To keep every displayed residual faithful to the discrete solve, ordinary equations for the trapezoidal method use algebraic voltages and currents at the interval midpoint and reactive derivatives across that interval. Backward Euler uses the right endpoint. The initial sample represents the unenergized state immediately before the source step. With these conventions, KCL, KVL, element-law, and animated wire-flow residuals all test the same numerical equation.
+
 ## Reported quantities
 
 Voltage is defined from each component's `node_a` to `node_b`. Current follows the same passive reference direction.

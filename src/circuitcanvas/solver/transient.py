@@ -95,7 +95,6 @@ def simulate(snapshot: CircuitSnapshot) -> SimulationResult:
         elif isinstance(component, Capacitor):
             current = np.zeros_like(voltage)
             current[1:] = component.capacitance * np.diff(voltage) / dt
-            current[0] = current[1]
             energy = 0.5 * component.capacitance * voltage**2
         else:
             current = state[:, system.component_aux_indices[component.id]]

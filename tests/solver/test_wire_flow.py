@@ -43,3 +43,20 @@ def test_wire_flow_sign_follows_stored_wire_orientation() -> None:
     flows = reconstruct_wire_flows(snapshot, result, -1)
 
     assert flows.currents["W1"] == pytest.approx(-0.085, rel=1e-4)
+
+
+def test_reactive_wire_flows_use_kirchhoff_consistent_time_sample() -> None:
+    circuit = Circuit.new(10.0)
+    stack = CircuitCommandStack(circuit)
+    resistor = stack.add_loose_component(ComponentKind.RESISTOR, 10.0, (280.0, 180.0))
+    inductor = stack.add_loose_component(ComponentKind.INDUCTOR, 0.05, (500.0, 180.0))
+    capacitor = stack.add_loose_component(ComponentKind.CAPACITOR, 1e-4, (720.0, 180.0))
+    stack.connect(TerminalRef("V1", "a"), TerminalRef(resistor, "a"))
+    stack.connect(TerminalRef(resistor, "b"), TerminalRef(inductor, "a"))
+    stack.connect(TerminalRef(inductor, "b"), TerminalRef(capacitor, "a"))
+    stack.connect(TerminalRef(capacitor, "b"), TerminalRef("V1", "b"))
+    snapshot = circuit.snapshot()
+
+    flows = reconstruct_wire_flows(snapshot, simulate(snapshot), 20)
+
+    assert max(flows.net_residuals.values()) < 1e-9

@@ -63,28 +63,40 @@ def _numeric_expression(terms: list[tuple[int, float]]) -> str:
 
 
 def _edges(snapshot: CircuitSnapshot, result: SimulationResult, index: int) -> list[_Edge]:
-    source_voltage = float(
-        result.node_voltages[snapshot.source.node_a][index]
-        - result.node_voltages[snapshot.source.node_b][index]
+    previous = max(0, index - 1)
+    use_midpoint = snapshot.settings.method == "trapezoidal" and index > 0
+
+    def algebraic_value(values: np.ndarray) -> float:
+        if use_midpoint:
+            return float(values[index] + values[previous]) / 2.0
+        return float(values[index])
+
+    source_voltages = (
+        result.node_voltages[snapshot.source.node_a] - result.node_voltages[snapshot.source.node_b]
     )
     edges = [
         _Edge(
             snapshot.source.id,
             snapshot.source.node_a,
             snapshot.source.node_b,
-            source_voltage,
-            float(result.source_current[index]),
+            algebraic_value(source_voltages),
+            algebraic_value(result.source_current),
         )
     ]
     for component in snapshot.components:
         branch = result.branches[component.id]
+        current = (
+            float(branch.current[index])
+            if isinstance(component, Capacitor)
+            else algebraic_value(branch.current)
+        )
         edges.append(
             _Edge(
                 component.id,
                 component.node_a,
                 component.node_b,
-                float(branch.voltage[index]),
-                float(branch.current[index]),
+                algebraic_value(branch.voltage),
+                current,
             )
         )
     return edges
@@ -213,20 +225,28 @@ def _law_lines(
         if isinstance(component, Resistor):
             symbolic = f"V_{component.id} = {component.id}·I_{component.id}"
             residual = voltage - component.resistance * current
+            substituted = f"{voltage:.6g} V = {component.resistance:.6g} Ω · {current:.6g} A"
         elif isinstance(component, Capacitor):
             symbolic = f"I_{component.id} = {component.id}·dv_{component.id}/dt"
             derivative = float(branch.voltage[index] - branch.voltage[previous]) / dt
             residual = current - component.capacitance * derivative
+            substituted = f"{current:.6g} A = {component.capacitance:.6g} F · {derivative:.6g} V/s"
         else:
             symbolic = f"V_{component.id} = {component.id}·di_{component.id}/dt"
             derivative = float(branch.current[index] - branch.current[previous]) / dt
-            residual = voltage - component.inductance * derivative
+            effective_voltage = voltage
+            if snapshot.settings.method == "trapezoidal" and index > 0:
+                effective_voltage = float(branch.voltage[index] + branch.voltage[previous]) / 2.0
+            residual = effective_voltage - component.inductance * derivative
+            substituted = (
+                f"{effective_voltage:.6g} V = {component.inductance:.6g} H · {derivative:.6g} A/s"
+            )
         lines.append(
             EquationLine(
                 f"LAW-{component.id}",
                 "law",
                 symbolic,
-                f"V={voltage:.6g} V, I={current:.6g} A",
+                substituted,
                 f"residual = {residual:.3g}",
                 residual,
                 (component.id,),
