@@ -13,7 +13,7 @@ authors = [{name = "Peichi Li"}]
 dependencies = [
   "numpy>=2.0",
   "scipy>=1.14",
-  "PySide6>=6.8",
+  "PySide6>=6.8,<6.11",
   "pyqtgraph>=0.13.7",
 ]
 
@@ -50,4 +50,3 @@ python_version = "3.12"
 strict = true
 packages = ["circuitcanvas"]
 mypy_path = "src"
-
