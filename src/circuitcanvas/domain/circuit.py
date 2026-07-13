@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .components import Component, VoltageSource
+from .wiring import Junction, Wire
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,9 @@ class CircuitSnapshot:
     settings: SimulationSettings
     revision: int
     positions: tuple[tuple[str, float, float], ...] = ()
+    junctions: tuple[Junction, ...] = ()
+    wires: tuple[Wire, ...] = ()
+    rotations: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(slots=True)
@@ -39,6 +43,9 @@ class Circuit:
     nodes: set[str] = field(default_factory=lambda: {"n_pos", "n_neg"})
     settings: SimulationSettings = field(default_factory=SimulationSettings)
     positions: dict[str, tuple[float, float]] = field(default_factory=dict)
+    rotations: dict[str, int] = field(default_factory=dict)
+    junctions: dict[str, Junction] = field(default_factory=dict)
+    wires: dict[str, Wire] = field(default_factory=dict)
     revision: int = 0
     open_edge: str | None = "w_main"
     _id_counters: dict[str, int] = field(default_factory=dict)
@@ -92,11 +99,40 @@ class Circuit:
         return component_id
 
     def snapshot(self) -> CircuitSnapshot:
+        source = self.source
+        components = tuple(self.components.values())
+        nodes = tuple(sorted(self.nodes))
+        if self.wires or self.junctions:
+            from .netlist import derive_connectivity
+            from .wiring import TerminalRef
+
+            connectivity = derive_connectivity(self)
+            source = replace(
+                self.source,
+                node_a=connectivity.node_for(TerminalRef(self.source.id, "a")),
+                node_b=connectivity.node_for(TerminalRef(self.source.id, "b")),
+            )
+            components = tuple(
+                component.with_endpoints(
+                    connectivity.node_for(TerminalRef(component.id, "a")),
+                    connectivity.node_for(TerminalRef(component.id, "b")),
+                )
+                for component in self.components.values()
+            )
+            nodes = tuple(
+                sorted(
+                    set(connectivity.terminal_nodes.values())
+                    | set(connectivity.junction_nodes.values())
+                )
+            )
         return CircuitSnapshot(
-            source=self.source,
-            components=tuple(self.components.values()),
-            nodes=tuple(sorted(self.nodes)),
+            source=source,
+            components=components,
+            nodes=nodes,
             settings=self.settings,
             revision=self.revision,
             positions=tuple((key, *value) for key, value in sorted(self.positions.items())),
+            junctions=tuple(self.junctions[key] for key in sorted(self.junctions)),
+            wires=tuple(self.wires[key] for key in sorted(self.wires)),
+            rotations=tuple(sorted(self.rotations.items())),
         )

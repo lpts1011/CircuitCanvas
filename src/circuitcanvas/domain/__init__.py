@@ -2,6 +2,7 @@
 
 from .circuit import Circuit, CircuitSnapshot, SimulationSettings
 from .components import Capacitor, ComponentKind, Inductor, Resistor, VoltageSource
+from .wiring import Junction, JunctionRef, TerminalRef, Wire
 
 __all__ = [
     "Capacitor",
@@ -12,4 +13,8 @@ __all__ = [
     "Resistor",
     "SimulationSettings",
     "VoltageSource",
+    "Junction",
+    "JunctionRef",
+    "TerminalRef",
+    "Wire",
 ]
