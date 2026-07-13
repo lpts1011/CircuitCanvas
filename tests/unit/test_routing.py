@@ -6,6 +6,7 @@ from circuitcanvas.ui.routing import (
     octilinear_route,
     project_to_octilinear,
     project_to_polyline,
+    split_polyline,
 )
 
 
@@ -44,3 +45,12 @@ def test_normalization_removes_duplicates_and_repairs_forbidden_angles() -> None
     assert points[-1] == (120.0, 60.0)
     assert len(points) == len(set(points))
     assert all(is_octilinear(left, right) for left, right in zip(points, points[1:], strict=False))
+
+
+def test_split_polyline_preserves_bends_on_both_sides() -> None:
+    polyline = ((0.0, 0.0), (40.0, 0.0), (40.0, 40.0), (80.0, 40.0))
+
+    left, right = split_polyline(polyline, (47.0, 20.0))
+
+    assert left == ((0.0, 0.0), (40.0, 0.0), (40.0, 20.0))
+    assert right == ((40.0, 20.0), (40.0, 40.0), (80.0, 40.0))

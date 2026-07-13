@@ -37,6 +37,7 @@ from .routing import (
     octilinear_route,
     project_to_octilinear,
     project_to_polyline,
+    split_polyline,
 )
 from .wire_items import JunctionItem, RouteHandleItem, TerminalItem, WireItem
 
@@ -349,28 +350,22 @@ class CircuitScene(QGraphicsScene):
         component_kind = kind if isinstance(kind, ComponentKind) else ComponentKind(kind)
         polyline = self._stored_wire_polyline(wire_id)
         pointer = (position.x(), position.y())
-        segments = tuple(zip(polyline, polyline[1:], strict=False))
-        if not segments:
+        if len(polyline) < 2:
             raise ValueError("Cannot insert a component on a zero-length wire")
-        start, end = min(
-            segments,
-            key=lambda segment: math.dist(
-                pointer, project_to_polyline(pointer, (segment[0], segment[1]))
-            ),
-        )
-        center = project_to_polyline(pointer, (start, end))
+        before, after = split_polyline(polyline, pointer)
+        center = before[-1]
+        start = before[-2]
+        end = after[1]
         vertical = abs(end[0] - start[0]) < 1.0 and abs(end[1] - start[1]) >= 1.0
         rotation = 90 if vertical else 0
-        terminal_a, terminal_b = self._component_terminal_positions(center, rotation)
-        wire = self.circuit.wires[wire_id]
         component_id = self.command_stack.insert_component_on_wire(
             wire_id,
             component_kind,
             DEFAULT_VALUES[component_kind],
             center,
             rotation,
-            octilinear_route(self._stored_endpoint_position(wire.start), terminal_a),
-            octilinear_route(terminal_b, self._stored_endpoint_position(wire.end)),
+            before[1:-1],
+            after[1:-1],
         )
         self.rebuild()
         self.component_items[component_id].setSelected(True)
@@ -436,16 +431,24 @@ class CircuitScene(QGraphicsScene):
         return QPointF(x, y)
 
     def add_route_handle_at(self, wire_id: str, position: QPointF) -> None:
-        projected = project_to_polyline(
-            (position.x(), position.y()), self._stored_wire_polyline(wire_id)
+        before, after = split_polyline(
+            self._stored_wire_polyline(wire_id), (position.x(), position.y())
         )
-        route = (*self.circuit.wires[wire_id].route, projected)
+        route = (*before[1:], *after[1:-1])
         self.command_stack.set_wire_route(wire_id, route)
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
 
     def split_wire_at(self, wire_id: str, position: QPointF) -> str:
-        junction_id = self.command_stack.split_wire(wire_id, (position.x(), position.y()))
+        before, after = split_polyline(
+            self._stored_wire_polyline(wire_id), (position.x(), position.y())
+        )
+        junction_id = self.command_stack.split_wire(
+            wire_id,
+            before[-1],
+            before[1:-1],
+            after[1:-1],
+        )
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
         return junction_id
@@ -534,12 +537,18 @@ class CircuitScene(QGraphicsScene):
             self.command_stack.connect(start, target_endpoint, route)
         elif isinstance(target, WireItem):
             wire_points = tuple((point.x(), point.y()) for point in target.polyline_points())
-            split_position = project_to_polyline(
-                (event.scenePos().x(), event.scenePos().y()), wire_points
+            before, after = split_polyline(
+                wire_points, (event.scenePos().x(), event.scenePos().y())
             )
+            split_position = before[-1]
             end_position = QPointF(*split_position)
             route = self._orthogonal_route(start_position, end_position)
-            junction_id = self.command_stack.split_wire(target.wire.id, split_position)
+            junction_id = self.command_stack.split_wire(
+                target.wire.id,
+                split_position,
+                before[1:-1],
+                after[1:-1],
+            )
             self.command_stack.connect(start, JunctionRef(junction_id), route)
         else:
             end_position = self._snapped_endpoint(start_position, event.scenePos())

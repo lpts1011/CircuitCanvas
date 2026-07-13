@@ -74,6 +74,33 @@ def project_to_polyline(point: Point, polyline: tuple[Point, ...]) -> Point:
     )
 
 
+def split_polyline(
+    polyline: tuple[Point, ...], point: Point
+) -> tuple[tuple[Point, ...], tuple[Point, ...]]:
+    """Project point onto a polyline and return both ordered sides of the split."""
+    if len(polyline) < 2:
+        raise ValueError("Polyline must contain at least two points")
+    candidates = [
+        (index, _project_to_segment(point, start, end))
+        for index, (start, end) in enumerate(zip(polyline, polyline[1:], strict=False))
+    ]
+    segment_index, projected = min(
+        candidates,
+        key=lambda candidate: (candidate[1][0] - point[0]) ** 2 + (candidate[1][1] - point[1]) ** 2,
+    )
+    left = list(polyline[: segment_index + 1])
+    right = list(polyline[segment_index + 1 :])
+    if math.dist(left[-1], projected) <= TOLERANCE:
+        projected = left[-1]
+    elif math.dist(projected, right[0]) <= TOLERANCE:
+        projected = right[0]
+    if left[-1] != projected:
+        left.append(projected)
+    if right[0] != projected:
+        right.insert(0, projected)
+    return tuple(left), tuple(right)
+
+
 def normalized_octilinear_polyline(points: tuple[Point, ...]) -> tuple[Point, ...]:
     """Remove zero-length segments and repair every forbidden-angle segment."""
     if not points:

@@ -183,3 +183,48 @@ def test_placing_component_on_visible_wire_inserts_it_in_series(qtbot) -> None:
 
     assert "W1" not in scene.circuit.wires
     assert component_id in scene.circuit.components
+
+
+def test_inserting_on_a_bent_wire_preserves_routes_before_and_after_component(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+    scene.command_stack.set_wire_route("W1", ((400.0, 290.0), (400.0, 350.0), (700.0, 350.0)))
+    scene.rebuild()
+
+    component_id = scene.insert_component_on_wire("resistor", "W1", QPointF(550.0, 350.0))
+
+    start_wire = next(
+        wire for wire in scene.circuit.wires.values() if wire.start == TerminalRef("V1", "a")
+    )
+    end_wire = next(wire for wire in scene.circuit.wires.values() if wire.end == JunctionRef("J1"))
+    assert component_id in scene.circuit.components
+    assert start_wire.route == ((400.0, 290.0), (400.0, 350.0))
+    assert end_wire.route[0] == (700.0, 350.0)
+
+
+def test_adding_handle_to_bent_wire_keeps_path_order(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+    scene.command_stack.set_wire_route("W1", ((400.0, 290.0), (400.0, 350.0), (700.0, 350.0)))
+    scene.rebuild()
+
+    scene.add_route_handle_at("W1", QPointF(412.0, 320.0))
+
+    assert scene.circuit.wires["W1"].route[:3] == (
+        (400.0, 290.0),
+        (400.0, 320.0),
+        (400.0, 350.0),
+    )
+
+
+def test_splitting_bent_wire_keeps_junction_and_bends_on_original_path(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+    scene.command_stack.set_wire_route("W1", ((400.0, 290.0), (400.0, 350.0), (700.0, 350.0)))
+    scene.rebuild()
+
+    junction_id = scene.split_wire_at("W1", QPointF(412.0, 320.0))
+
+    second = next(
+        wire for wire in scene.circuit.wires.values() if wire.start == JunctionRef(junction_id)
+    )
+    assert scene.circuit.junctions[junction_id].position == (400.0, 320.0)
+    assert scene.circuit.wires["W1"].route == ((400.0, 290.0),)
+    assert second.route[:2] == ((400.0, 350.0), (700.0, 350.0))

@@ -346,15 +346,21 @@ class CircuitCommandStack:
         assert isinstance(result, str)
         return result
 
-    def split_wire(self, wire_id: str, position: Point) -> str:
+    def split_wire(
+        self,
+        wire_id: str,
+        position: Point,
+        start_route: tuple[Point, ...] = (),
+        end_route: tuple[Point, ...] = (),
+    ) -> str:
         def operation() -> str:
             wire = self.circuit.wires[wire_id]
             junction_id = self.circuit.next_junction_id()
             junction_ref = JunctionRef(junction_id)
             self.circuit.junctions[junction_id] = Junction(junction_id, position)
-            self.circuit.wires[wire_id] = replace(wire, end=junction_ref, route=())
+            self.circuit.wires[wire_id] = replace(wire, end=junction_ref, route=start_route)
             second_id = self.circuit.next_wire_id()
-            self.circuit.wires[second_id] = Wire(second_id, junction_ref, wire.end)
+            self.circuit.wires[second_id] = Wire(second_id, junction_ref, wire.end, end_route)
             self.circuit.touch()
             return junction_id
 
