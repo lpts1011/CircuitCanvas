@@ -9,7 +9,13 @@ from circuitcanvas.solver.transient import simulate
 
 @pytest.mark.parametrize(
     "filename",
-    ["resistor.json", "rc-charge.json", "rl-step.json", "rlc-underdamped.json"],
+    [
+        "resistor.json",
+        "rc-charge.json",
+        "rl-step.json",
+        "rlc-underdamped.json",
+        "parallel-series-17v.json",
+    ],
 )
 def test_bundled_example_loads_and_simulates(filename: str) -> None:
     circuit = load_circuit(Path("examples") / filename)

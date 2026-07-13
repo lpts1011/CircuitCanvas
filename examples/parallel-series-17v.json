@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "source": {"id": "V1", "node_a": "n_pos", "node_b": "n_neg", "voltage": 17.0},
+  "components": [
+    {"id": "R1", "kind": "resistor", "node_a": "loose_R1_a", "node_b": "loose_R1_b", "value": 100.0, "rotation": 0},
+    {"id": "R2", "kind": "resistor", "node_a": "loose_R2_a", "node_b": "loose_R2_b", "value": 100.0, "rotation": 0},
+    {"id": "R3", "kind": "resistor", "node_a": "loose_R3_a", "node_b": "loose_R3_b", "value": 200.0, "rotation": 0}
+  ],
+  "nodes": ["n_neg", "n_pos"],
+  "positions": {"R1": [340.0, 180.0], "R2": [560.0, 180.0], "R3": [450.0, 360.0]},
+  "rotations": {"R1": 0, "R2": 0, "R3": 0},
+  "junctions": [],
+  "wires": [
+    {"id": "W1", "start": {"type": "terminal", "owner": "V1", "terminal": "a"}, "end": {"type": "terminal", "owner": "R1", "terminal": "a"}, "route": []},
+    {"id": "W2", "start": {"type": "terminal", "owner": "R1", "terminal": "b"}, "end": {"type": "terminal", "owner": "R2", "terminal": "a"}, "route": []},
+    {"id": "W3", "start": {"type": "terminal", "owner": "R2", "terminal": "b"}, "end": {"type": "terminal", "owner": "V1", "terminal": "b"}, "route": []},
+    {"id": "W4", "start": {"type": "terminal", "owner": "V1", "terminal": "a"}, "end": {"type": "terminal", "owner": "R3", "terminal": "a"}, "route": []},
+    {"id": "W5", "start": {"type": "terminal", "owner": "R3", "terminal": "b"}, "end": {"type": "terminal", "owner": "V1", "terminal": "b"}, "route": []}
+  ],
+  "settings": {"duration": 0.1, "samples": 1000, "method": "trapezoidal"},
+  "open_edge": null
+}
