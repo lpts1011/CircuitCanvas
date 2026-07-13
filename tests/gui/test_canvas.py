@@ -1,3 +1,4 @@
+import pytest
 from PySide6.QtCore import QPointF
 from PySide6.QtTest import QSignalSpy
 
@@ -6,6 +7,7 @@ from circuitcanvas.domain.wiring import JunctionRef, TerminalRef
 from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.transient import simulate
 from circuitcanvas.ui.circuit_scene import CircuitScene
+from circuitcanvas.ui.routing import is_octilinear
 
 
 def test_scene_starts_with_battery_and_open_drop_target(qtbot) -> None:
@@ -84,8 +86,8 @@ def test_scene_connects_arbitrary_component_terminals(qtbot) -> None:
     assert wire_id in scene.wire_items
     assert scene.circuit.wires[wire_id].start == TerminalRef(r1, "b")
     assert scene.circuit.wires[wire_id].end == TerminalRef(r2, "a")
-    assert len(scene.circuit.wires[wire_id].route) == 2
-    assert len(scene.route_handle_items) == 2
+    assert len(scene.circuit.wires[wire_id].route) == 1
+    assert len(scene.route_handle_items) == 1
 
 
 def test_equation_highlight_does_not_retrigger_component_navigation(qtbot) -> None:
@@ -109,3 +111,66 @@ def test_junction_dot_is_a_wire_start_and_end_target(qtbot) -> None:
     scene.rebuild()
 
     assert scene._endpoint_for_item(scene.junction_items[junction_id]) == JunctionRef(junction_id)
+
+
+def test_route_handle_move_is_projected_back_to_its_wire(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+    scene.command_stack.set_wire_route("W1", ((500.0, 290.0),))
+    scene.rebuild()
+
+    scene._route_moved("W1", 0, 410.0, 337.0)
+
+    assert scene.circuit.wires["W1"].route[0] == pytest.approx((410.0, 290.0))
+
+
+def test_junction_move_is_projected_onto_an_incident_wire(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+
+    scene._junction_moved("J1", 850.0, 360.0)
+
+    assert scene.circuit.junctions["J1"].position == pytest.approx((850.0, 290.0))
+
+
+def test_component_inserted_on_wire_replaces_the_conductive_span(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop(12.0))
+
+    component_id = scene.insert_component_on_wire("resistor", "W1", QPointF(520.0, 290.0))
+
+    assert "W1" not in scene.circuit.wires
+    assert scene.circuit.positions[component_id] == pytest.approx((520.0, 290.0))
+    assert scene.circuit.rotations[component_id] == 0
+    assert simulate(scene.circuit.snapshot()).branches[component_id].voltage[-1] == pytest.approx(
+        12.0
+    )
+
+
+def test_component_inserted_on_vertical_wire_rotates_90_degrees(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop(12.0))
+
+    component_id = scene.insert_component_on_wire("resistor", "W2", QPointF(980.0, 360.0))
+
+    assert scene.circuit.rotations[component_id] == 90
+    assert all(
+        is_octilinear(
+            (left.x(), left.y()),
+            (right.x(), right.y()),
+        )
+        for item in scene.wire_items.values()
+        for left, right in zip(item.polyline_points(), item.polyline_points()[1:], strict=False)
+    )
+
+
+def test_free_wire_endpoint_snaps_to_nearest_allowed_direction(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+
+    snapped = scene._snapped_endpoint(QPointF(0.0, 0.0), QPointF(20.0, 7.0))
+
+    assert snapped == QPointF(20.0, 0.0)
+
+
+def test_new_route_handle_is_projected_onto_wire(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+
+    scene.add_route_handle_at("W1", QPointF(410.0, 337.0))
+
+    assert scene.circuit.wires["W1"].route[-1] == pytest.approx((410.0, 290.0))

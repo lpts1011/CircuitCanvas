@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.domain.wiring import EndpointRef, Wire
 
+from .routing import normalized_octilinear_polyline
+
 
 class TerminalItem(QGraphicsObject):
     def __init__(self, ref: EndpointRef, parent: QGraphicsObject) -> None:
@@ -108,24 +110,26 @@ class WireItem(QGraphicsObject):
         self.current = 0.0
         self.phase = 0.0
         self.stale = True
-        self._path = self._orthogonal_path(start, end)
+        raw_points = (
+            (start.x(), start.y()),
+            *wire.route,
+            (end.x(), end.y()),
+        )
+        normalized = normalized_octilinear_polyline(raw_points)
+        self._points = tuple(QPointF(x, y) for x, y in normalized)
+        self._path = self._path_from_points()
         self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsSelectable)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setZValue(-1)
 
-    def _orthogonal_path(self, start: QPointF, end: QPointF) -> QPainterPath:
-        path = QPainterPath(start)
-        points = [QPointF(x, y) for x, y in self.wire.route]
-        if not points and start.x() != end.x() and start.y() != end.y():
-            middle_x = (start.x() + end.x()) / 2.0
-            points = [QPointF(middle_x, start.y()), QPointF(middle_x, end.y())]
-        current = QPointF(start)
-        for target in (*points, end):
-            if current.x() != target.x() and current.y() != target.y():
-                path.lineTo(target.x(), current.y())
-            path.lineTo(target)
-            current = QPointF(target)
+    def _path_from_points(self) -> QPainterPath:
+        path = QPainterPath(self._points[0])
+        for point in self._points[1:]:
+            path.lineTo(point)
         return path
+
+    def polyline_points(self) -> tuple[QPointF, ...]:
+        return self._points
 
     def path(self) -> QPainterPath:
         return self._path

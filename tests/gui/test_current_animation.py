@@ -2,6 +2,7 @@ from PySide6.QtCore import QPointF
 
 from circuitcanvas.domain.wiring import TerminalRef, Wire
 from circuitcanvas.ui.playback import PlaybackController
+from circuitcanvas.ui.routing import is_octilinear
 from circuitcanvas.ui.wire_items import WireItem
 
 
@@ -46,3 +47,20 @@ def test_playback_uses_one_timer_for_time_and_animation(qtbot) -> None:
 
     assert playback.timer.interval() == 16
     playback.set_playing(False)
+
+
+def test_wire_item_path_contains_only_horizontal_vertical_or_45_degree_segments(qtbot) -> None:
+    wire = Wire(
+        "W1",
+        TerminalRef("V1", "a"),
+        TerminalRef("R1", "a"),
+        ((31.0, 17.0),),
+    )
+    item = WireItem(wire, QPointF(0.0, 0.0), QPointF(100.0, 60.0))
+
+    points = item.polyline_points()
+
+    assert all(
+        is_octilinear((left.x(), left.y()), (right.x(), right.y()))
+        for left, right in zip(points, points[1:], strict=False)
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 from PySide6.QtCore import QObject, QPointF, QRect, QRectF, Qt, Signal
@@ -31,6 +32,12 @@ from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.results import SimulationResult
 
 from .component_items import BatteryItem, ComponentItem, DropTargetItem
+from .routing import (
+    normalized_octilinear_polyline,
+    octilinear_route,
+    project_to_octilinear,
+    project_to_polyline,
+)
 from .wire_items import JunctionItem, RouteHandleItem, TerminalItem, WireItem
 
 DEFAULT_VALUES = {
@@ -227,6 +234,22 @@ class CircuitScene(QGraphicsScene):
             return self.battery_item.terminals[endpoint.terminal].scenePos()
         return self.component_items[endpoint.owner_id].terminals[endpoint.terminal].scenePos()
 
+    def _stored_endpoint_position(self, endpoint: EndpointRef) -> tuple[float, float]:
+        if isinstance(endpoint, JunctionRef):
+            return self.circuit.junctions[endpoint.junction_id].position
+        position = self._endpoint_position(endpoint)
+        return (position.x(), position.y())
+
+    def _stored_wire_polyline(self, wire_id: str) -> tuple[tuple[float, float], ...]:
+        wire = self.circuit.wires[wire_id]
+        return normalized_octilinear_polyline(
+            (
+                self._stored_endpoint_position(wire.start),
+                *wire.route,
+                self._stored_endpoint_position(wire.end),
+            )
+        )
+
     @staticmethod
     def _endpoint_for_item(item: object) -> EndpointRef | None:
         if isinstance(item, TerminalItem):
@@ -241,13 +264,20 @@ class CircuitScene(QGraphicsScene):
         self.circuit_changed.emit(self.circuit.revision)
 
     def _junction_moved(self, junction_id: str, x: float, y: float) -> None:
-        self.command_stack.move_junction(junction_id, (x, y))
+        candidates = []
+        junction_ref = JunctionRef(junction_id)
+        for wire_id, wire in self.circuit.wires.items():
+            if junction_ref in (wire.start, wire.end):
+                candidates.append(project_to_polyline((x, y), self._stored_wire_polyline(wire_id)))
+        previous = self.circuit.junctions[junction_id].position
+        constrained = min(candidates, key=lambda point: math.dist(point, (x, y)), default=previous)
+        self.command_stack.move_junction(junction_id, constrained)
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
 
     def _route_moved(self, wire_id: str, route_index: int, x: float, y: float) -> None:
         route = list(self.circuit.wires[wire_id].route)
-        route[route_index] = (x, y)
+        route[route_index] = project_to_polyline((x, y), self._stored_wire_polyline(wire_id))
         self.command_stack.set_wire_route(wire_id, tuple(route))
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
@@ -295,6 +325,45 @@ class CircuitScene(QGraphicsScene):
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
 
+    def insert_component_on_wire(
+        self, kind: ComponentKind | str, wire_id: str, position: QPointF
+    ) -> str:
+        component_kind = kind if isinstance(kind, ComponentKind) else ComponentKind(kind)
+        polyline = self._stored_wire_polyline(wire_id)
+        pointer = (position.x(), position.y())
+        segments = tuple(zip(polyline, polyline[1:], strict=False))
+        if not segments:
+            raise ValueError("Cannot insert a component on a zero-length wire")
+        start, end = min(
+            segments,
+            key=lambda segment: math.dist(
+                pointer, project_to_polyline(pointer, (segment[0], segment[1]))
+            ),
+        )
+        center = project_to_polyline(pointer, (start, end))
+        vertical = abs(end[0] - start[0]) < 1.0 and abs(end[1] - start[1]) >= 1.0
+        rotation = 90 if vertical else 0
+        if vertical:
+            terminal_a = (center[0], center[1] - 84.0)
+            terminal_b = (center[0], center[1] + 84.0)
+        else:
+            terminal_a = (center[0] - 84.0, center[1])
+            terminal_b = (center[0] + 84.0, center[1])
+        wire = self.circuit.wires[wire_id]
+        component_id = self.command_stack.insert_component_on_wire(
+            wire_id,
+            component_kind,
+            DEFAULT_VALUES[component_kind],
+            center,
+            rotation,
+            octilinear_route(self._stored_endpoint_position(wire.start), terminal_a),
+            octilinear_route(terminal_b, self._stored_endpoint_position(wire.end)),
+        )
+        self.rebuild()
+        self.component_items[component_id].setSelected(True)
+        self.circuit_changed.emit(self.circuit.revision)
+        return component_id
+
     def connect_for_test(self, start: EndpointRef, end: EndpointRef) -> str:
         route = self._orthogonal_route(self._endpoint_position(start), self._endpoint_position(end))
         wire_id = self.command_stack.connect(start, end, route)
@@ -304,10 +373,24 @@ class CircuitScene(QGraphicsScene):
 
     @staticmethod
     def _orthogonal_route(start: QPointF, end: QPointF) -> tuple[tuple[float, float], ...]:
-        if abs(start.x() - end.x()) < 1.0 or abs(start.y() - end.y()) < 1.0:
-            return ()
-        middle_x = (start.x() + end.x()) / 2.0
-        return ((middle_x, start.y()), (middle_x, end.y()))
+        return octilinear_route((start.x(), start.y()), (end.x(), end.y()))
+
+    @staticmethod
+    def _snapped_endpoint(start: QPointF, pointer: QPointF) -> QPointF:
+        x, y = project_to_octilinear(
+            (start.x(), start.y()),
+            (pointer.x(), pointer.y()),
+        )
+        return QPointF(x, y)
+
+    def add_route_handle_at(self, wire_id: str, position: QPointF) -> None:
+        projected = project_to_polyline(
+            (position.x(), position.y()), self._stored_wire_polyline(wire_id)
+        )
+        route = (*self.circuit.wires[wire_id].route, projected)
+        self.command_stack.set_wire_route(wire_id, route)
+        self.rebuild()
+        self.circuit_changed.emit(self.circuit.revision)
 
     def split_wire_at(self, wire_id: str, position: QPointF) -> str:
         junction_id = self.command_stack.split_wire(wire_id, (position.x(), position.y()))
@@ -371,9 +454,8 @@ class CircuitScene(QGraphicsScene):
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._wire_start is not None and self._wire_preview is not None:
             start = self._endpoint_position(self._wire_start)
-            self._wire_preview.setLine(
-                start.x(), start.y(), event.scenePos().x(), event.scenePos().y()
-            )
+            end = self._snapped_endpoint(start, event.scenePos())
+            self._wire_preview.setLine(start.x(), start.y(), end.x(), end.y())
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -389,21 +471,27 @@ class CircuitScene(QGraphicsScene):
         self._wire_start = None
         self._wire_preview = None
         start_position = self._endpoint_position(start)
-        end_position = event.scenePos()
-        route = self._orthogonal_route(start_position, end_position)
         target_endpoint = self._endpoint_for_item(target)
         if target_endpoint == start:
             self.rebuild()
             event.accept()
             return
         if target_endpoint is not None:
+            end_position = self._endpoint_position(target_endpoint)
+            route = self._orthogonal_route(start_position, end_position)
             self.command_stack.connect(start, target_endpoint, route)
         elif isinstance(target, WireItem):
-            junction_id = self.command_stack.split_wire(
-                target.wire.id, (event.scenePos().x(), event.scenePos().y())
+            wire_points = tuple((point.x(), point.y()) for point in target.polyline_points())
+            split_position = project_to_polyline(
+                (event.scenePos().x(), event.scenePos().y()), wire_points
             )
+            end_position = QPointF(*split_position)
+            route = self._orthogonal_route(start_position, end_position)
+            junction_id = self.command_stack.split_wire(target.wire.id, split_position)
             self.command_stack.connect(start, JunctionRef(junction_id), route)
         else:
+            end_position = self._snapped_endpoint(start_position, event.scenePos())
+            route = self._orthogonal_route(start_position, end_position)
             self.command_stack.connect_to_new_junction(
                 start, (end_position.x(), end_position.y()), route
             )
@@ -414,10 +502,7 @@ class CircuitScene(QGraphicsScene):
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         item = self.itemAt(event.scenePos(), QTransform())
         if isinstance(item, WireItem):
-            route = (*item.wire.route, (event.scenePos().x(), event.scenePos().y()))
-            self.command_stack.set_wire_route(item.wire.id, route)
-            self.rebuild()
-            self.circuit_changed.emit(self.circuit.revision)
+            self.add_route_handle_at(item.wire.id, event.scenePos())
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
