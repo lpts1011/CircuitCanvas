@@ -1,3 +1,7 @@
+import pytest
+from PySide6.QtCore import Qt
+
+
 def test_main_window_adds_repeated_components_and_updates_summary(qtbot) -> None:
     from circuitcanvas.ui.main_window import MainWindow
 
@@ -42,6 +46,24 @@ def test_toolbar_rotates_and_deletes_selected_component(qtbot) -> None:
     assert window.circuit.rotations[component_id] == 90
 
     window.delete_action.trigger()
+    assert component_id not in window.circuit.components
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Backspace, Qt.Key.Key_Delete])
+def test_keyboard_delete_keys_remove_selected_component(qtbot, key: Qt.Key) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    window.show()
+    window.activateWindow()
+    qtbot.wait(20)
+    component_id = window.add_component("resistor")
+    window.scene.component_items[component_id].setSelected(True)
+    window.view.setFocus()
+
+    qtbot.keyClick(window.view, key)
+
     assert component_id not in window.circuit.components
 
 

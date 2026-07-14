@@ -88,7 +88,9 @@ class MainWindow(QMainWindow):
         self.rotate_action.setShortcut(QKeySequence("R"))
         self.rotate_action.triggered.connect(self.scene.rotate_selected)
         self.delete_action = QAction("Delete", self)
-        self.delete_action.setShortcut(QKeySequence(Qt.Key.Key_Delete))
+        self.delete_action.setShortcuts(
+            [QKeySequence(Qt.Key.Key_Delete), QKeySequence(Qt.Key.Key_Backspace)]
+        )
         self.delete_action.triggered.connect(self._delete_selected)
         image_action = QAction("Export PNG", self)
         image_action.triggered.connect(self.export_png)
