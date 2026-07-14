@@ -58,7 +58,7 @@ On Windows, activate the environment with `.venv\Scripts\activate` before runnin
 3. Select a component and choose **Add parallel** to create a fully wired parallel branch, or place a component away from a wire and connect it manually.
 4. Drag an orange terminal dot to another terminal to make a connection. Drop a new wire onto an existing wire to create a real electrical junction; a visual crossing without a junction dot remains disconnected.
 5. Shift-drag a junction dot to continue wiring from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
-6. Select a component and use **Rotate** (or `R`), **Delete**, the value field, or the logarithmic slider.
+6. Select a component and use **Rotate** (or `R`), **Delete**/**Backspace**, the value field, or the logarithmic slider.
 7. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation highlights its circuit elements.
 8. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
 9. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result.
