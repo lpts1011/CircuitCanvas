@@ -12,11 +12,12 @@ def test_main_window_adds_repeated_components_and_updates_summary(qtbot) -> None
     window.add_component("inductor")
     window.add_component("resistor")
 
-    qtbot.waitUntil(lambda: "Total current" in window.summary_label.text(), timeout=3000)
+    qtbot.waitUntil(lambda: window.current_result is not None, timeout=3000)
 
     assert len(window.circuit.components) == 4
-    assert "Total power" in window.summary_label.text()
-    assert "Circuit valid" in window.status_label.text()
+    assert window.details.component_count.value.text() == "4"
+    assert window.details.battery_current.value.text().endswith("A")
+    assert "Circuit solved" in window.status_label.text()
 
 
 def test_undo_and_redo_restore_component(qtbot) -> None:
@@ -90,7 +91,7 @@ def test_starter_short_gives_component_insertion_instruction(qtbot) -> None:
     window = MainWindow(debounce_ms=0)
     qtbot.addWidget(window)
 
-    qtbot.waitUntil(lambda: "place a component on a wire" in window.status_label.text().lower())
+    qtbot.waitUntil(lambda: "add a component to the loop" in window.status_label.text().lower())
 
 
 def test_parallel_helper_creates_a_wired_parallel_branch(qtbot) -> None:
@@ -102,7 +103,7 @@ def test_parallel_helper_creates_a_wired_parallel_branch(qtbot) -> None:
 
     window._duplicate_parallel(first)
 
-    qtbot.waitUntil(lambda: "Circuit valid" in window.status_label.text(), timeout=3000)
+    qtbot.waitUntil(lambda: "Circuit solved" in window.status_label.text(), timeout=3000)
     snapshot = window.circuit.snapshot()
     components = {component.id: component for component in snapshot.components}
     assert len(components) == 2
@@ -318,7 +319,7 @@ def test_equation_outline_only_shows_on_the_equations_tab(qtbot) -> None:
     window.equations.select_equation("LAW-" + component_id)
     assert item.highlighted
 
-    window.sidebar_tabs.setCurrentWidget(window.inspector)
+    window.sidebar_tabs.setCurrentWidget(window.details)
     assert not item.highlighted
 
 
@@ -381,7 +382,7 @@ def test_double_clicking_a_component_opens_its_value_for_editing(qtbot) -> None:
         qtbot.mouseDClick(window.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
 
     assert signal.args == [component_id]
-    assert window.sidebar_tabs.currentWidget() is window.inspector
+    assert window.sidebar_tabs.currentWidget() is window.details
     assert window.scene.selected_component_id() == component_id
     assert window.inspector.value_edit.selectedText() == window.inspector.value_edit.text()
 
@@ -397,7 +398,7 @@ def test_palette_stays_visible_next_to_the_inspector(qtbot) -> None:
     window.add_component("resistor")
 
     assert window.component_palette.isVisible()
-    assert window.sidebar_tabs.currentWidget() is window.inspector
+    assert window.sidebar_tabs.currentWidget() is window.details
 
 
 def test_export_csv_without_selection_saves_every_component(qtbot, monkeypatch, tmp_path) -> None:

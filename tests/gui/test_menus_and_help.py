@@ -29,7 +29,7 @@ def test_opening_an_example_gives_an_untitled_clean_copy(qtbot) -> None:
     assert window._current_path is None
     assert window.windowTitle().startswith("RC charging (example)")
     assert not window.has_unsaved_changes
-    qtbot.waitUntil(lambda: "Circuit valid" in window.status_label.text(), timeout=3000)
+    qtbot.waitUntil(lambda: "Circuit solved" in window.status_label.text(), timeout=3000)
 
 
 def test_toolbar_labels_stay_short_while_menus_use_ellipses(qtbot) -> None:

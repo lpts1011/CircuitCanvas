@@ -26,13 +26,27 @@ simulation settings, protects your work, and ships as a downloadable app.
 
 ### Changed
 
+- **A clearer layout.** Components to add are on the left, the circuit in the middle, and a
+  Details panel on the right shows either the whole circuit or the selected component with
+  large voltage, current, power, and energy readings. Graphs fill the bottom, with voltage and
+  current in separate plots. Play and a time slider sit at the top with the current moment
+  ("t = 10 ms of 50 ms"); the canvas, readings, graphs, and laws all follow it, and the dashed
+  line on a graph can be dragged too.
+- Voltage is always blue and current always orange, on the canvas and in the graphs.
+- Play runs the whole time span in about six seconds (adjustable) and stops at the end; before,
+  1× was real time, so a 25 ms circuit finished before you could see it.
+- When the circuit cannot be solved, a plain-language message appears above it, the component
+  causing it is outlined in red, and stale numbers and graphs are hidden.
+- Right-click menus on components, wires, junctions, bends, the battery, and empty canvas.
+- Kirchhoff's laws have readable names (Junction 1, Loop 1, R1: Ohm's law).
+- Icons in the toolbar, symbols on the component buttons, a light theme, the system font, and
+  upright labels on rotated components.
 - Scrolling or a two-finger swipe now pans the canvas. Zoom with ⌘/Ctrl + scroll or a pinch;
   zoom is limited to 20–400 % so the circuit can no longer shrink out of sight.
 - Values are shown with SI prefixes everywhere (`10 kΩ`, `4.7 nF`, `1.188 mA`) instead of
   `10000 Ω`, `2.2e+06 Ω`, or `6.969e-11 A`.
 - One slider drag, or one battery-voltage edit, is a single undo step. The battery voltage and
   the time span are now part of undo history.
-- The component buttons stay visible above the Inspector and Equations tabs.
 - Bundled examples were redrawn as tidy loops and live inside the package.
 
 ### Fixed
