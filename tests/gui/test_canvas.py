@@ -47,8 +47,8 @@ def test_result_updates_component_annotation(qtbot) -> None:
 
     scene.set_result(result, len(result.time) - 1)
 
-    assert "10.000 V" in scene.component_items[resistor].measurement_text
-    assert "A" in scene.component_items[resistor].measurement_text
+    # 10 V across the default 100 Ω resistor: readable SI values, not raw floats.
+    assert scene.component_items[resistor].measurement_text == "10 V  ·  100 mA"
 
 
 def test_canvas_expands_for_many_series_and_parallel_components(qtbot) -> None:

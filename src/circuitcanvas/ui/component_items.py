@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from circuitcanvas.domain.components import Capacitor, Component, Inductor
 from circuitcanvas.domain.wiring import TerminalRef
 
+from .formatting import format_component_value, format_si
 from .wire_items import TerminalItem
 
 
@@ -44,7 +45,9 @@ class BatteryItem(QGraphicsObject):
         painter.setPen(QColor("#1e3a8a"))
         painter.setFont(QFont("Arial", 10, QFont.Weight.DemiBold))
         painter.drawText(
-            QRectF(-42, -48, 84, 20), Qt.AlignmentFlag.AlignCenter, f"{self.voltage:g} V"
+            QRectF(-42, -48, 84, 20),
+            Qt.AlignmentFlag.AlignCenter,
+            format_si(self.voltage, "V"),
         )
         painter.drawText(QRectF(-38, -7, 16, 16), Qt.AlignmentFlag.AlignCenter, "+")
         painter.drawText(QRectF(-38, 20, 16, 16), Qt.AlignmentFlag.AlignCenter, "−")
@@ -94,7 +97,7 @@ class ComponentItem(QGraphicsObject):
         return QRectF(-84, -49, 168, 98)
 
     def set_measurement(self, voltage: float, current: float) -> None:
-        self.measurement_text = f"V {voltage:.3f} V  ·  I {current:.4g} A"
+        self.measurement_text = f"{format_si(voltage, 'V')}  ·  {format_si(current, 'A')}"
         self.update()
 
     def _draw_symbol(self, painter: QPainter) -> None:
@@ -153,12 +156,8 @@ class ComponentItem(QGraphicsObject):
         )
 
     def _title(self) -> str:
-        value = self.component.value
-        if isinstance(self.component, Capacitor):
-            return f"{self.component.id} · {value * 1e6:g} μF"
-        if isinstance(self.component, Inductor):
-            return f"{self.component.id} · {value * 1e3:g} mH"
-        return f"{self.component.id} · {value:g} Ω"
+        value = format_component_value(self.component.kind.value, self.component.value)
+        return f"{self.component.id} · {value}"
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         super().mouseReleaseEvent(event)

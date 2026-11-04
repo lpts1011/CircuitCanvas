@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections import defaultdict
+from collections.abc import Callable, Hashable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 
@@ -10,6 +11,7 @@ from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import (
     Component,
     ComponentKind,
+    VoltageSource,
     make_component,
     replace_value,
 )
@@ -109,8 +111,58 @@ def delete_component(circuit: Circuit, component_id: str) -> Component:
         raise KeyError(component_id) from None
 
 
+def delete_elements(
+    circuit: Circuit,
+    component_ids: Iterable[str] = (),
+    wire_ids: Iterable[str] = (),
+    junction_ids: Iterable[str] = (),
+    bends: Iterable[tuple[str, int]] = (),
+) -> None:
+    """Remove a mixed selection of components, wires, junctions, and wire bends.
+
+    Deleting a junction also deletes every wire attached to it. Junctions left
+    without any wire afterwards are removed, because they could no longer be
+    seen as part of the circuit.
+    """
+    bends_by_wire: dict[str, set[int]] = defaultdict(set)
+    for wire_id, index in bends:
+        bends_by_wire[wire_id].add(index)
+    for wire_id, indices in bends_by_wire.items():
+        wire = circuit.wires.get(wire_id)
+        if wire is not None:
+            route = tuple(point for index, point in enumerate(wire.route) if index not in indices)
+            circuit.wires[wire_id] = replace(wire, route=route)
+
+    for component_id in component_ids:
+        if component_id in circuit.components:
+            delete_component(circuit, component_id)
+
+    for wire_id in wire_ids:
+        circuit.wires.pop(wire_id, None)
+
+    doomed = set(junction_ids)
+    for wire_id, wire in tuple(circuit.wires.items()):
+        if any(
+            isinstance(endpoint, JunctionRef) and endpoint.junction_id in doomed
+            for endpoint in (wire.start, wire.end)
+        ):
+            del circuit.wires[wire_id]
+
+    used = {
+        endpoint.junction_id
+        for wire in circuit.wires.values()
+        for endpoint in (wire.start, wire.end)
+        if isinstance(endpoint, JunctionRef)
+    }
+    for junction_id in tuple(circuit.junctions):
+        if junction_id in doomed or junction_id not in used:
+            del circuit.junctions[junction_id]
+    circuit.touch()
+
+
 @dataclass(slots=True)
 class _CircuitState:
+    source: VoltageSource
     components: dict[str, Component]
     nodes: set[str]
     positions: dict[str, tuple[float, float]]
@@ -125,6 +177,7 @@ class _CircuitState:
     @classmethod
     def capture(cls, circuit: Circuit) -> _CircuitState:
         return cls(
+            circuit.source,
             deepcopy(circuit.components),
             set(circuit.nodes),
             dict(circuit.positions),
@@ -138,6 +191,7 @@ class _CircuitState:
         )
 
     def restore(self, circuit: Circuit) -> None:
+        circuit.source = self.source
         circuit.components = deepcopy(self.components)
         circuit.nodes = set(self.nodes)
         circuit.positions = dict(self.positions)
@@ -158,13 +212,44 @@ class CircuitCommandStack:
         self.circuit = circuit
         self._states = [_CircuitState.capture(circuit)]
         self._index = 0
+        self._merge_key: Hashable | None = None
+        self._clean_state: _CircuitState | None = self._states[0]
 
-    def _execute(self, operation: Callable[[], object | None]) -> object | None:
+    def _execute(
+        self,
+        operation: Callable[[], object | None],
+        merge_key: Hashable | None = None,
+    ) -> object | None:
+        """Run an edit and record it as one history entry.
+
+        Consecutive edits that pass the same non-None ``merge_key`` (for example,
+        every tick of one slider drag) replace the latest entry instead of adding
+        new ones, so a single undo reverts the whole gesture.
+        """
+        merging = (
+            merge_key is not None
+            and merge_key == self._merge_key
+            and self._index > 0
+            and self._index == len(self._states) - 1
+        )
         result = operation()
+        if merging:
+            self._states[self._index] = _CircuitState.capture(self.circuit)
+            return result
         del self._states[self._index + 1 :]
         self._states.append(_CircuitState.capture(self.circuit))
         self._index += 1
+        self._merge_key = merge_key
         return result
+
+    def mark_clean(self) -> None:
+        """Remember the current state as saved."""
+        self._clean_state = self._states[self._index]
+
+    @property
+    def is_clean(self) -> bool:
+        """True when the circuit matches the last saved (or initial) state."""
+        return self._states[self._index] is self._clean_state
 
     def insert_series(
         self, target_edge: str | None, kind: ComponentKind | str, value: float
@@ -180,11 +265,33 @@ class CircuitCommandStack:
         assert isinstance(result, str)
         return result
 
-    def update_value(self, component_id: str, value: float) -> None:
-        self._execute(lambda: update_component_value(self.circuit, component_id, value))
+    def update_value(
+        self, component_id: str, value: float, *, merge_key: Hashable | None = None
+    ) -> None:
+        self._execute(lambda: update_component_value(self.circuit, component_id, value), merge_key)
+
+    def set_source_voltage(self, voltage: float, *, merge_key: Hashable | None = None) -> None:
+        def operation() -> None:
+            self.circuit.source = replace(self.circuit.source, voltage=voltage)
+            self.circuit.touch()
+
+        self._execute(operation, merge_key)
 
     def delete(self, component_id: str) -> None:
         self._execute(lambda: delete_component(self.circuit, component_id))
+
+    def delete_elements(
+        self,
+        component_ids: Iterable[str] = (),
+        wire_ids: Iterable[str] = (),
+        junction_ids: Iterable[str] = (),
+        bends: Iterable[tuple[str, int]] = (),
+    ) -> None:
+        components, wires, junctions = tuple(component_ids), tuple(wire_ids), tuple(junction_ids)
+        bend_refs = tuple(bends)
+        self._execute(
+            lambda: delete_elements(self.circuit, components, wires, junctions, bend_refs)
+        )
 
     def add_loose_component(self, kind: ComponentKind | str, value: float, position: Point) -> str:
         component_kind = _kind(kind)
@@ -405,6 +512,7 @@ class CircuitCommandStack:
         if self._index == 0:
             return False
         self._index -= 1
+        self._merge_key = None
         self._states[self._index].restore(self.circuit)
         return True
 
@@ -412,5 +520,6 @@ class CircuitCommandStack:
         if self._index >= len(self._states) - 1:
             return False
         self._index += 1
+        self._merge_key = None
         self._states[self._index].restore(self.circuit)
         return True
