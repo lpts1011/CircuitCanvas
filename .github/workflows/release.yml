@@ -1,0 +1,105 @@
+name: Release
+
+# Push a tag such as v0.4.0 to build the apps and open a draft GitHub Release.
+# Run it by hand (Actions → Release → Run workflow) to build the apps without releasing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  apps:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS-AppleSilicon
+            binary: dist/CircuitCanvas.app/Contents/MacOS/CircuitCanvas
+          - os: windows-latest
+            label: Windows-x64
+            binary: dist/CircuitCanvas/CircuitCanvas.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - name: Read the app version
+        id: version
+        shell: bash
+        run: echo "version=$(python -c 'import circuitcanvas; print(circuitcanvas.__version__)')" >> "$GITHUB_OUTPUT"
+      - name: Check that the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_NAME" != "v${{ steps.version.outputs.version }}" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version ${{ steps.version.outputs.version }} in src/circuitcanvas/__init__.py"
+            exit 1
+          fi
+      - run: pyinstaller --noconfirm circuitcanvas.spec
+      - name: Check that the built app starts
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python scripts/smoke_test_app.py "${{ matrix.binary }}"
+      - name: Zip the macOS app
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/CircuitCanvas.app "CircuitCanvas-${{ steps.version.outputs.version }}-${{ matrix.label }}.zip"
+      - name: Zip the Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/CircuitCanvas -DestinationPath "CircuitCanvas-${{ steps.version.outputs.version }}-${{ matrix.label }}.zip"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: app-${{ matrix.label }}
+          path: CircuitCanvas-*.zip
+          if-no-files-found: error
+
+  python-package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build
+      - uses: actions/upload-artifact@v5
+        with:
+          name: python-package
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [apps, python-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v5
+        with:
+          path: release
+          merge-multiple: true
+      - name: Write release notes from CHANGELOG.md
+        run: python scripts/release_notes.py "${GITHUB_REF_NAME#v}" > notes.md
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --draft \
+            --title "CircuitCanvas $GITHUB_REF_NAME" \
+            --notes-file notes.md

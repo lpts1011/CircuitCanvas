@@ -1,4 +1,9 @@
-"""Render a deterministic portfolio screenshot with a Kirchhoff branch example."""
+"""Render the README screenshot: the RLC ringing example with its Kirchhoff equations.
+
+    python scripts/capture_screenshot.py
+
+Renders off screen at 2x so the image stays sharp on high-density displays.
+"""
 
 from __future__ import annotations
 
@@ -6,41 +11,45 @@ import os
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_SCALE_FACTOR", "2")
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from circuitcanvas.app import configure_application
-from circuitcanvas.examples import EXAMPLES, load_example
+from circuitcanvas.examples import EXAMPLES
 from circuitcanvas.ui.main_window import MainWindow
+
+TARGET = Path("docs/images/circuitcanvas-main.png")
 
 
 def main() -> int:
     app = QApplication([])
     configure_application(app)
     window = MainWindow(debounce_ms=0)
-    window.resize(1600, 960)
-    example = next(item for item in EXAMPLES if item.filename == "parallel-series-17v.json")
-    window._replace_circuit(load_example(example))
-    window.scene.component_items["R1"].setSelected(True)
-    window.sidebar_tabs.setCurrentWidget(window.equations)
+    window.resize(1500, 900)
     window.show()
+    window.open_example(next(item for item in EXAMPLES if item.filename == "rlc-underdamped.json"))
 
     def prepare_capture() -> None:
-        window.view.horizontalScrollBar().setValue(0)
-        window.view.verticalScrollBar().setValue(0)
+        window.sidebar_tabs.setCurrentWidget(window.equations)
+        window.scene.component_items["C1"].setSelected(True)
+        window.equations.select_equation("KVL1")
+        window.statusBar().clearMessage()
+        window.view.fit_circuit()
         QTimer.singleShot(300, capture)
 
     def capture() -> None:
-        target = Path("docs/images/circuitcanvas-main.png")
-        target.parent.mkdir(parents=True, exist_ok=True)
+        TARGET.parent.mkdir(parents=True, exist_ok=True)
         window.repaint()
         app.processEvents()
-        if not window.grab().save(str(target)):
-            raise RuntimeError(f"Could not save {target}")
+        if not window.grab().save(str(TARGET)):
+            raise RuntimeError(f"Could not save {TARGET}")
+        print(f"Saved {TARGET}")
+        window.scene.command_stack.mark_clean()
         app.quit()
 
-    QTimer.singleShot(2200, prepare_capture)
+    QTimer.singleShot(1500, prepare_capture)
     return app.exec()
 
 

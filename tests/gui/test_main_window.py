@@ -425,3 +425,41 @@ def test_export_csv_without_selection_saves_every_component(qtbot, monkeypatch, 
     assert suggested == ["circuit-data.csv"]
     header = target.read_text(encoding="utf-8").splitlines()[0]
     assert "R1_voltage_v" in header and "C1_current_a" in header
+
+
+def test_adding_a_component_selects_only_the_new_one(qtbot) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    first = window.add_component("resistor")
+    second = window.add_component("capacitor")
+
+    selected = [
+        item.component.id for item in window.scene.component_items.values() if item.isSelected()
+    ]
+    assert selected == [second]
+    assert window.inspector.component is not None
+    assert window.inspector.component.id == second
+
+    window.delete_action.trigger()
+    assert first in window.circuit.components
+    assert second not in window.circuit.components
+
+
+def test_readme_quick_start_edits_the_double_clicked_resistor(qtbot) -> None:
+    import pytest
+
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    resistor = window.add_component("resistor")
+    capacitor = window.add_component("capacitor")
+
+    window.edit_component(resistor)
+    window.inspector.value_edit.setText("10k")
+    window.inspector.value_edit.editingFinished.emit()
+
+    assert window.circuit.components[resistor].value == pytest.approx(10e3)
+    assert window.circuit.components[capacitor].value == pytest.approx(47e-6)
