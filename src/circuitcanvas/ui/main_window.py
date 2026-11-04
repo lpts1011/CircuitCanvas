@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
             icon_name="trash",
         )
         self.deselect_action = self._action(
-            "Deselect", self.scene.clearSelection, "Deselect everything", ["Esc"]
+            "Deselect", self._escape, "Stop drawing a wire, or deselect everything", ["Esc"]
         )
         self.play_action = self._action(
             "Play or Pause", self.time_bar.play_button.toggle, "Play or pause", ["Space"]
@@ -377,6 +377,7 @@ class MainWindow(QMainWindow):
         self.scene.selection_changed.connect(self._selection_changed)
         self.scene.component_activated.connect(self.edit_component)
         self.scene.source_activated.connect(self._edit_source_voltage)
+        self.scene.hint_requested.connect(lambda text: self.statusBar().showMessage(text, 6000))
         self.view.edit_requested.connect(self.edit_component)
         self.view.parallel_requested.connect(self._duplicate_parallel)
         self.inspector.value_changed.connect(self._update_value)
@@ -433,6 +434,12 @@ class MainWindow(QMainWindow):
         self.scene.select_only(component_id)
         self.sidebar_tabs.setCurrentWidget(self.details)
         self.inspector.focus_value()
+
+    def _escape(self) -> None:
+        if self.scene.drawing_wire:
+            self.scene.cancel_wire()
+        else:
+            self.scene.clearSelection()
 
     def _edit_source_voltage(self) -> None:
         self.scene.clearSelection()

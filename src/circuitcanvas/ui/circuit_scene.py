@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QDropEvent,
     QNativeGestureEvent,
     QPainter,
+    QPainterPath,
     QPen,
     QResizeEvent,
     QTransform,
@@ -22,8 +23,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsEllipseItem,
     QGraphicsItem,
-    QGraphicsLineItem,
+    QGraphicsPathItem,
     QGraphicsScene,
     QGraphicsSceneMouseEvent,
     QGraphicsView,
@@ -66,6 +68,8 @@ class CircuitScene(QGraphicsScene):
     #: Double-click on a component or the battery: "I want to edit this".
     component_activated = Signal(str)
     source_activated = Signal()
+    #: A short tip for the status bar, e.g. after a wire was released in empty space.
+    hint_requested = Signal(str)
 
     def __init__(self, circuit: Circuit, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -79,7 +83,10 @@ class CircuitScene(QGraphicsScene):
         self.open_target: DropTargetItem | None = None
         self.guide_item: GuideItem | None = None
         self._wire_start: EndpointRef | None = None
-        self._wire_preview: QGraphicsLineItem | None = None
+        self._wire_preview: QGraphicsPathItem | None = None
+        self._wire_marker: QGraphicsEllipseItem | None = None
+        self._wire_target: tuple[str, EndpointRef | str, QPointF] | None = None
+        self._wire_gesture = 0
         self._suppress_selection_signal = False
         self.highlighted_components: set[str] = set()
         self.problem_components: set[str] = set()
@@ -100,6 +107,7 @@ class CircuitScene(QGraphicsScene):
             painter.drawLine(int(rect_f.left()), y, int(rect_f.right()), y)
 
     def rebuild(self) -> None:
+        self.cancel_wire()
         # Clearing and recreating items fires several transient selection changes;
         # report only the selection that survives the rebuild.
         self._suppress_selection_signal = True
@@ -530,7 +538,7 @@ class CircuitScene(QGraphicsScene):
         return new_id
 
     def connect_for_test(self, start: EndpointRef, end: EndpointRef) -> str:
-        route = self._orthogonal_route(self._endpoint_position(start), self._endpoint_position(end))
+        route = self.wire_route(start, self._endpoint_position(start), self._endpoint_position(end))
         wire_id = self.command_stack.connect(start, end, route)
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
@@ -644,32 +652,256 @@ class CircuitScene(QGraphicsScene):
         for wire in self.wire_items.values():
             wire.set_stale(True)
 
-    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        item = self.itemAt(event.scenePos(), QTransform())
-        endpoint = self._endpoint_for_item(item)
-        junction_wire_drag = isinstance(item, JunctionItem) and bool(
-            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+    # ----- Drawing wires -----------------------------------------------------------------
+    #
+    # Distances are in screen pixels, so the feel is the same at any zoom.
+    #: Press this close to a dot to start a wire from it.
+    GRAB_RADIUS = 14.0
+    #: While dragging, the wire end jumps to a dot this close and the dot turns green.
+    MAGNET_RADIUS = 28.0
+    #: Otherwise it lands on a wire this close, which then gets a junction there.
+    WIRE_MAGNET_RADIUS = 16.0
+
+    def _scene_distance(self, pixels: float) -> float:
+        views = self.views()
+        zoom = views[0].transform().m11() if views else 1.0
+        return pixels / max(zoom, 1e-6)
+
+    def _connectable_items(self) -> list[tuple[EndpointRef, QGraphicsItem]]:
+        items: list[tuple[EndpointRef, QGraphicsItem]] = [
+            (terminal.ref, terminal) for terminal in self._terminal_items()
+        ]
+        items.extend(
+            (JunctionRef(junction_id), item) for junction_id, item in self.junction_items.items()
         )
-        if isinstance(item, TerminalItem) or junction_wire_drag:
-            assert endpoint is not None
-            self._wire_start = endpoint
-            start_position = self._endpoint_position(endpoint)
-            self._wire_preview = self.addLine(
-                start_position.x(),
-                start_position.y(),
-                event.scenePos().x(),
-                event.scenePos().y(),
-                QPen(QColor("#0ea5e9"), 3, Qt.PenStyle.DashLine),
+        return items
+
+    def endpoint_near(
+        self,
+        position: QPointF,
+        radius: float,
+        *,
+        exclude: EndpointRef | None = None,
+        terminals_only: bool = False,
+    ) -> EndpointRef | None:
+        """The closest terminal (or junction) dot within ``radius`` scene units."""
+        best: tuple[float, EndpointRef] | None = None
+        for ref, item in self._connectable_items():
+            if ref == exclude or (terminals_only and isinstance(ref, JunctionRef)):
+                continue
+            centre = item.scenePos()
+            distance = math.dist((position.x(), position.y()), (centre.x(), centre.y()))
+            if distance <= radius and (best is None or distance < best[0]):
+                best = (distance, ref)
+        return best[1] if best is not None else None
+
+    def _terminal_direction(self, endpoint: EndpointRef) -> tuple[float, float] | None:
+        """The way a terminal points out of its component, e.g. (-1, 0) for a left end."""
+        if not isinstance(endpoint, TerminalRef):
+            return None
+        if endpoint.owner_id == self.circuit.source.id:
+            owner: QGraphicsItem | None = self.battery_item
+        else:
+            owner = self.component_items.get(endpoint.owner_id)
+        if owner is None:
+            return None
+        tip = self._endpoint_position(endpoint)
+        centre = owner.scenePos()
+        dx, dy = tip.x() - centre.x(), tip.y() - centre.y()
+        length = math.hypot(dx, dy)
+        return (dx / length, dy / length) if length > 1e-9 else None
+
+    #: How far a wire runs straight out of a terminal before turning back past it.
+    WIRE_STUB = 24.0
+
+    def wire_route(
+        self, start: EndpointRef, start_position: QPointF, end_position: QPointF
+    ) -> tuple[tuple[float, float], ...]:
+        """A clean right-angled route from a terminal to ``end_position``.
+
+        The wire leaves a terminal along its component's axis. When the end lies
+        ahead, one bend is enough; when it lies behind, the wire first runs a short
+        stub outward, so it never travels along or across its own component.
+        """
+        sx, sy = start_position.x(), start_position.y()
+        ex, ey = end_position.x(), end_position.y()
+        direction = self._terminal_direction(start)
+        if direction is None:
+            if abs(ex - sx) < 1.0 or abs(ey - sy) < 1.0:
+                return ()
+            return ((ex, sy),) if abs(ex - sx) >= abs(ey - sy) else ((sx, ey),)
+        ox, oy = direction
+        stub = self.WIRE_STUB
+        if abs(ox) >= abs(oy):
+            outward = math.copysign(1.0, ox)
+            if (ex - sx) * outward > 0:
+                return () if abs(ey - sy) < 1.0 else ((ex, sy),)
+            turn_x = sx + outward * stub
+            return ((turn_x, sy), (turn_x, ey)) if abs(ey - sy) >= 1.0 else ()
+        outward = math.copysign(1.0, oy)
+        if (ey - sy) * outward > 0:
+            return () if abs(ex - sx) < 1.0 else ((sx, ey),)
+        turn_y = sy + outward * stub
+        return ((sx, turn_y), (ex, turn_y)) if abs(ex - sx) >= 1.0 else ()
+
+    def _wires_touching(self, endpoint: EndpointRef) -> set[str]:
+        return {
+            wire_id
+            for wire_id, wire in self.circuit.wires.items()
+            if endpoint in (wire.start, wire.end)
+        }
+
+    def begin_wire(self, start: EndpointRef) -> None:
+        self.cancel_wire()
+        self._wire_start = start
+        self._wire_target = None
+        pen = QPen(QColor("#94a3b8"), 3, Qt.PenStyle.DashLine, Qt.PenCapStyle.RoundCap)
+        self._wire_preview = self.addPath(QPainterPath(), pen)
+        self._wire_preview.setZValue(20)
+        self._wire_marker = self.addEllipse(
+            QRectF(-7, -7, 14, 14), QPen(QColor("#ffffff"), 2), QColor("#16a34a")
+        )
+        self._wire_marker.setZValue(21)
+        self._wire_marker.hide()
+        for ref, item in self._connectable_items():
+            if isinstance(item, (TerminalItem, JunctionItem)):
+                item.set_wire_state(candidate=ref != start, targeted=False)
+
+    def update_wire_drag(self, pointer: QPointF) -> None:
+        """Move the end of the wire being drawn, snapping to the nearest target."""
+        start = self._wire_start
+        if start is None or self._wire_preview is None or self._wire_marker is None:
+            return
+        start_position = self._endpoint_position(start)
+        self._wire_target = None
+        end = pointer
+        endpoint = self.endpoint_near(
+            pointer, self._scene_distance(self.MAGNET_RADIUS), exclude=start
+        )
+        if endpoint is not None:
+            end = self._endpoint_position(endpoint)
+            self._wire_target = ("endpoint", endpoint, end)
+        else:
+            excluded = self._wires_touching(start)
+            radius = self._scene_distance(self.WIRE_MAGNET_RADIUS)
+            best: tuple[float, str, QPointF] | None = None
+            for wire_id, wire_item in self.wire_items.items():
+                if wire_id in excluded:
+                    continue
+                polyline = tuple((p.x(), p.y()) for p in wire_item.polyline_points())
+                projected = project_to_polyline((pointer.x(), pointer.y()), polyline)
+                distance = math.dist((pointer.x(), pointer.y()), projected)
+                if distance <= radius and (best is None or distance < best[0]):
+                    best = (distance, wire_id, QPointF(*projected))
+            if best is not None:
+                end = best[2]
+                self._wire_target = ("wire", best[1], end)
+
+        for ref, item in self._connectable_items():
+            if isinstance(item, (TerminalItem, JunctionItem)):
+                item.set_wire_state(
+                    candidate=ref != start, targeted=endpoint is not None and ref == endpoint
+                )
+        on_wire = self._wire_target is not None and self._wire_target[0] == "wire"
+        self._wire_marker.setVisible(on_wire)
+        if on_wire:
+            self._wire_marker.setPos(end)
+
+        path = QPainterPath(start_position)
+        for x, y in self.wire_route(start, start_position, end):
+            path.lineTo(x, y)
+        path.lineTo(end)
+        self._wire_preview.setPath(path)
+        connected = self._wire_target is not None
+        self._wire_preview.setPen(
+            QPen(
+                QColor("#16a34a" if connected else "#94a3b8"),
+                3,
+                Qt.PenStyle.SolidLine if connected else Qt.PenStyle.DashLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
             )
+        )
+
+    def finish_wire(self, pointer: QPointF) -> bool:
+        """Release the wire being drawn. Returns True if a wire was created."""
+        start = self._wire_start
+        if start is None:
+            return False
+        self.update_wire_drag(pointer)
+        target = self._wire_target
+        self.cancel_wire()
+        if target is None:
+            self.hint_requested.emit(
+                "No wire was added. Release on a dot or a wire to connect: "
+                "it turns green when the wire will snap to it."
+            )
+            return False
+        start_position = self._endpoint_position(start)
+        self._wire_gesture += 1
+        merge_key = ("wire", self._wire_gesture)
+        kind, identifier, end_position = target
+        route = self.wire_route(start, start_position, end_position)
+        if kind == "endpoint":
+            assert isinstance(identifier, (TerminalRef, JunctionRef))
+            self.command_stack.connect(start, identifier, route, merge_key=merge_key)
+        else:
+            assert isinstance(identifier, str)
+            item = self.wire_items[identifier]
+            polyline = tuple((p.x(), p.y()) for p in item.polyline_points())
+            before, after = split_polyline(polyline, (end_position.x(), end_position.y()))
+            junction_id = self.command_stack.split_wire(
+                identifier, before[-1], before[1:-1], after[1:-1], merge_key=merge_key
+            )
+            self.command_stack.connect(start, JunctionRef(junction_id), route, merge_key=merge_key)
+        self.rebuild()
+        self.circuit_changed.emit(self.circuit.revision)
+        return True
+
+    def cancel_wire(self) -> None:
+        """Stop drawing a wire without changing the circuit (Esc)."""
+        for preview in (self._wire_preview, self._wire_marker):
+            if preview is not None and preview.scene() is self:
+                self.removeItem(preview)
+        self._wire_preview = None
+        self._wire_marker = None
+        self._wire_start = None
+        self._wire_target = None
+        for _ref, item in self._connectable_items():
+            if isinstance(item, (TerminalItem, JunctionItem)):
+                item.set_wire_state(candidate=False, targeted=False)
+
+    @property
+    def drawing_wire(self) -> bool:
+        return self._wire_start is not None
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        position = event.scenePos()
+        item = self.itemAt(position, QTransform())
+        shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        start: EndpointRef | None = None
+        if isinstance(item, TerminalItem):
+            start = item.ref
+        elif isinstance(item, JunctionItem):
+            start = JunctionRef(item.junction_id) if shift else None
+        elif not isinstance(item, RouteHandleItem):
+            # Pressing just beside a terminal still starts a wire from it.
+            start = self.endpoint_near(
+                position, self._scene_distance(self.GRAB_RADIUS), terminals_only=True
+            )
+        if start is not None:
+            self.begin_wire(start)
+            self.update_wire_drag(position)
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        if self._wire_start is not None and self._wire_preview is not None:
-            start = self._endpoint_position(self._wire_start)
-            end = self._snapped_endpoint(start, event.scenePos())
-            self._wire_preview.setLine(start.x(), start.y(), end.x(), end.y())
+        if self._wire_start is not None:
+            self.update_wire_drag(event.scenePos())
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -678,45 +910,17 @@ class CircuitScene(QGraphicsScene):
         if self._wire_start is None:
             super().mouseReleaseEvent(event)
             return
-        start = self._wire_start
-        if self._wire_preview is not None:
-            self.removeItem(self._wire_preview)
-        target = self.itemAt(event.scenePos(), QTransform())
-        self._wire_start = None
-        self._wire_preview = None
-        start_position = self._endpoint_position(start)
-        target_endpoint = self._endpoint_for_item(target)
-        if target_endpoint == start:
-            self.rebuild()
+        if self._endpoint_position(self._wire_start) == event.scenePos() or (
+            self.endpoint_near(
+                event.scenePos(), self._scene_distance(self.GRAB_RADIUS), terminals_only=True
+            )
+            == self._wire_start
+        ):
+            # A click on a dot, not a drag: nothing to connect.
+            self.cancel_wire()
             event.accept()
             return
-        if target_endpoint is not None:
-            end_position = self._endpoint_position(target_endpoint)
-            route = self._orthogonal_route(start_position, end_position)
-            self.command_stack.connect(start, target_endpoint, route)
-        elif isinstance(target, WireItem):
-            wire_points = tuple((point.x(), point.y()) for point in target.polyline_points())
-            before, after = split_polyline(
-                wire_points, (event.scenePos().x(), event.scenePos().y())
-            )
-            split_position = before[-1]
-            end_position = QPointF(*split_position)
-            route = self._orthogonal_route(start_position, end_position)
-            junction_id = self.command_stack.split_wire(
-                target.wire.id,
-                split_position,
-                before[1:-1],
-                after[1:-1],
-            )
-            self.command_stack.connect(start, JunctionRef(junction_id), route)
-        else:
-            end_position = self._snapped_endpoint(start_position, event.scenePos())
-            route = self._orthogonal_route(start_position, end_position)
-            self.command_stack.connect_to_new_junction(
-                start, (end_position.x(), end_position.y()), route
-            )
-        self.rebuild()
-        self.circuit_changed.emit(self.circuit.revision)
+        self.finish_wire(event.scenePos())
         event.accept()
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:

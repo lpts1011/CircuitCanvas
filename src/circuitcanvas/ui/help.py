@@ -42,10 +42,11 @@ QUICK_START_HTML = (
 
 <h3>Wiring by hand</h3>
 <ul>
-  <li>Drag from an <b>orange</b> terminal dot to another terminal to draw a wire.
-  Blue dots are already connected.</li>
-  <li>Drop a wire end onto an existing wire to join them with a junction dot.
-  Wires that merely cross are <i>not</i> connected.</li>
+  <li>Drag from a terminal dot (orange = not connected yet) towards another dot or a wire.
+  The wire snaps on when you get close and the target turns <b>green</b>; release there.
+  Releasing anywhere else adds nothing, and Esc cancels.</li>
+  <li>Ending on a wire joins it with a junction dot. Wires that merely cross are
+  <i>not</i> connected.</li>
   <li>Shift-drag a junction dot to start a new wire from it. Double-click a wire to add
   a bend that you can drag.</li>
   <li>Select anything and press <b>Delete</b> to remove it, or right-click it for more

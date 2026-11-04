@@ -38,6 +38,10 @@ simulation settings, protects your work, and ships as a downloadable app.
 - When the circuit cannot be solved, a plain-language message appears above it, the component
   causing it is outlined in red, and stale numbers and graphs are hidden.
 - Right-click menus on components, wires, junctions, bends, the battery, and empty canvas.
+- Drawing a wire feels direct: it follows the pointer with right-angle bends exactly as it will
+  be drawn, snaps onto a dot or wire within reach (the target turns green; possible targets
+  are ringed), can be started from just beside a dot, and never leaves a dangling end when
+  released in empty space. Connecting to the middle of a wire is one undo step; Esc cancels.
 - Dropping a component near a wire inserts it there (the target wire glows while you drag), and dragging a loose component onto a wire connects it.
 - Kirchhoff's laws have readable names (Junction 1, Loop 1, R1: Ohm's law).
 - Icons in the toolbar, symbols on the component buttons, a light theme, the system font, and
