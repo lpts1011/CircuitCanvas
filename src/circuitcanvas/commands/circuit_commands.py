@@ -325,7 +325,14 @@ class CircuitCommandStack:
         assert isinstance(result, str)
         return result
 
-    def connect(self, start: EndpointRef, end: EndpointRef, route: tuple[Point, ...] = ()) -> str:
+    def connect(
+        self,
+        start: EndpointRef,
+        end: EndpointRef,
+        route: tuple[Point, ...] = (),
+        *,
+        merge_key: Hashable | None = None,
+    ) -> str:
         def operation() -> str:
             self.circuit.assert_endpoint(start)
             self.circuit.assert_endpoint(end)
@@ -334,7 +341,7 @@ class CircuitCommandStack:
             self.circuit.touch()
             return wire_id
 
-        result = self._execute(operation)
+        result = self._execute(operation, merge_key)
         assert isinstance(result, str)
         return result
 
@@ -501,6 +508,8 @@ class CircuitCommandStack:
         position: Point,
         start_route: tuple[Point, ...] = (),
         end_route: tuple[Point, ...] = (),
+        *,
+        merge_key: Hashable | None = None,
     ) -> str:
         def operation() -> str:
             wire = self.circuit.wires[wire_id]
@@ -513,7 +522,7 @@ class CircuitCommandStack:
             self.circuit.touch()
             return junction_id
 
-        result = self._execute(operation)
+        result = self._execute(operation, merge_key)
         assert isinstance(result, str)
         return result
 
