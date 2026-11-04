@@ -396,12 +396,9 @@ class MainWindow(QMainWindow):
 
     def edit_component(self, component_id: str) -> None:
         """Select a component and put the cursor in its value field."""
-        item = self.scene.component_items.get(component_id)
-        if item is None:
+        if component_id not in self.scene.component_items:
             return
-        if not item.isSelected():
-            self.scene.clearSelection()
-            item.setSelected(True)
+        self.scene.select_only(component_id)
         self.sidebar_tabs.setCurrentWidget(self.inspector)
         self.inspector.focus_value()
 
@@ -692,6 +689,12 @@ class MainWindow(QMainWindow):
         self._replace_circuit(circuit)
         self.statusBar().showMessage(example.description, 8000)
         return True
+
+    def open_document(self, path: Path) -> bool:
+        """Open a file chosen outside the app (Finder, command line), asking to save first."""
+        if not self._confirm_discard_changes():
+            return False
+        return self.open_path(path)
 
     def open_path(self, path: Path) -> bool:
         try:

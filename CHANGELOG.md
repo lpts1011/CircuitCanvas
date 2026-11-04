@@ -1,0 +1,60 @@
+# Changelog
+
+## 0.4.0
+
+The "usable by anyone" release: CircuitCanvas now explains itself, picks sensible
+simulation settings, protects your work, and ships as a downloadable app.
+
+### New
+
+- **Download and run** without Python: a macOS (Apple silicon) app and a Windows app are
+  built for every release, plus a Python wheel for everything else.
+- **Automatic time span.** The simulation covers about five of the circuit's slowest time
+  constants, so an RC with τ = 10 s is simulated for 50 s instead of 0.1 s. Type your own
+  span (`200 ms`, `2 s`) to override it.
+- **Type values the way engineers write them:** `4.7k`, `10u`, `4k7`, `2.2 MΩ`, `330 ohm`.
+- **Double-click to edit:** a component opens its value; the battery opens its voltage.
+- **Menu bar** with File, Edit, View, and Help, including **File → Open Example** with five
+  ready-made circuits and **Help → Quick Start Guide** (F1) and **Keyboard Shortcuts**.
+- **"Start here" card** on an empty circuit, and tooltips on every control and canvas item.
+- **Delete anything:** wires, junction dots, and wire bends, not only components.
+- **Save As**, a file name in the title bar, and a prompt before New, Open, or Quit
+  discards unsaved changes.
+- **Export CSV** with nothing selected saves every component in one table.
+- **Fit view** (⌘/Ctrl 0) and zoom shortcuts; the whole circuit is shown when a file opens.
+- An app icon, and double-clicking a saved `.circuitcanvas` file in Finder opens it.
+
+### Changed
+
+- Scrolling or a two-finger swipe now pans the canvas. Zoom with ⌘/Ctrl + scroll or a pinch;
+  zoom is limited to 20–400 % so the circuit can no longer shrink out of sight.
+- Values are shown with SI prefixes everywhere (`10 kΩ`, `4.7 nF`, `1.188 mA`) instead of
+  `10000 Ω`, `2.2e+06 Ω`, or `6.969e-11 A`.
+- One slider drag, or one battery-voltage edit, is a single undo step. The battery voltage and
+  the time span are now part of undo history.
+- The component buttons stay visible above the Inspector and Equations tabs.
+- Bundled examples were redrawn as tidy loops and live inside the package.
+
+### Fixed
+
+- The Inspector's **Rotate** button did nothing.
+- Every recalculation made the Equations panel select components on the canvas, so Delete or
+  Rotate could act on components you never chose. Equation highlighting is now a separate
+  outline, shown only on the Equations tab.
+- Adding a component left the previously selected one selected too, so the Inspector could
+  edit the wrong component and Delete removed both.
+- The Inspector kept showing a component after it was deselected.
+- On startup the battery was outside the visible canvas.
+- Saving or exporting to a location that cannot be written crashed instead of showing a message.
+
+## 0.3.1
+
+- Delete or Backspace removes the selected component.
+
+## 0.3.0
+
+- Start from an editable closed loop; wires follow horizontal, vertical, or 45° paths.
+
+## 0.2.0
+
+- Free wiring with junctions, Kirchhoff equation browser, and animated current arrows.

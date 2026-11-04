@@ -1,8 +1,29 @@
+<img src="assets/icon/CircuitCanvas.png" alt="" width="96" align="right">
+
 # CircuitCanvas
 
-**A visual RLC circuit builder and time-domain simulator.** Start from a complete construction loop, insert resistors, capacitors, and inductors in series or parallel, and watch the Kirchhoff equations, current direction, voltage, power, and stored energy update automatically.
+**Build an electric circuit by clicking, and watch it work.** Add resistors, capacitors, and inductors to a battery loop. CircuitCanvas solves the circuit instantly and shows the voltage and current in every part, how they change over time, and the Kirchhoff equations behind them.
 
-![CircuitCanvas showing a free-wired Kirchhoff analysis](docs/images/circuitcanvas-main.png)
+![CircuitCanvas showing an RLC circuit ringing, with one Kirchhoff loop equation outlined on the canvas](docs/images/circuitcanvas-main.png)
+
+## Download
+
+Get the app from the [latest release](https://github.com/lpts1011/CircuitCanvas/releases/latest). No Python or setup is needed.
+
+| Your computer | Download | The first time you open it |
+|---|---|---|
+| Mac with Apple silicon (M1 or newer) | `CircuitCanvas-…-macOS-AppleSilicon.zip` | Unzip it and drag **CircuitCanvas** into Applications. Because the app is not notarized by Apple, macOS says it cannot verify the developer: open **System Settings → Privacy & Security** and click **Open Anyway**. |
+| Windows 10 or 11 (64-bit) | `CircuitCanvas-…-Windows-x64.zip` | Unzip the whole folder, then run **CircuitCanvas.exe** inside it. If SmartScreen appears, click **More info → Run anyway**. |
+| Intel Mac, Linux, or anything else | `circuitcanvas-…-py3-none-any.whl` | Install it with Python 3.12 or newer (`python -m pip install <file>`), then run `circuitcanvas`. You can also [run from source](#run-from-source). |
+
+## Your first circuit in one minute
+
+1. **Click Resistor** on the right. It drops into the battery loop and the circuit is solved: the resistor shows its voltage and current, and blue arrows show the current flowing.
+2. **Click Capacitor.** Now it is an RC circuit, and the graph shows the capacitor charging.
+3. **Double-click the resistor** and type `10k`. The capacitor charges more slowly, and the time span grows automatically so you still see the whole curve.
+4. Press **Play** to watch it happen, or open **Equations** to see Kirchhoff's laws with the solved numbers filled in.
+
+Stuck? **Help → Quick Start Guide** (F1) explains the rest, and **File → Open Example** has five ready-made circuits. Saved circuits (`.circuitcanvas` files) open with a double-click on macOS.
 
 ## Why this project exists
 
@@ -39,23 +60,7 @@ The application does not call an external circuit simulator. Its Python solver a
 - Built-in examples, a quick start guide, a shortcut reference, and tooltips on every control and canvas item
 - Analytical tests against closed-form RC and RL solutions
 
-## Install and run
-
-CircuitCanvas requires Python 3.12 or newer.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-circuitcanvas
-```
-
-On Windows, activate the environment with `.venv\Scripts\activate` before running the remaining commands.
-
-## Build a circuit
-
-New here? Choose **Help ▸ Quick Start Guide** in the app, or **File ▸ Open Example** for a ready-made circuit.
+## Build a circuit: the full guide
 
 1. The canvas opens with a battery, a complete construction loop, and a "Start here" card. The wire-only loop is intentionally marked as a short circuit until you insert a component.
 2. Click **Resistor**, **Capacitor**, or **Inductor** to insert it **in series** on the longest wire, or drag it onto the exact wire you want. The palette stays visible while you edit.
@@ -105,7 +110,23 @@ Canvas labels + plots + table + exports
 
 The domain and solver packages have no Qt dependencies, which keeps the numerical core easy to test and reusable. Physical connectivity comes only from terminal-to-terminal wires and explicit junctions—not screen proximity. Background results carry the circuit revision that produced them, so a slow older simulation cannot overwrite a newer edit. See [the architecture notes](docs/architecture.md) for module boundaries and data flow.
 
-## Verify the project
+## For developers
+
+### Run from source
+
+CircuitCanvas requires Python 3.12 or newer.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+circuitcanvas
+```
+
+On Windows, activate the environment with `.venv\Scripts\activate` before running the remaining commands. A circuit file can be passed on the command line: `circuitcanvas my-circuit.circuitcanvas`.
+
+### Verify the project
 
 ```bash
 ruff format --check .
@@ -117,18 +138,31 @@ python -m build
 
 The suite covers free graph edits, schema migration, MNA stamps, analytical transients, KCL/KVL residuals, ideal-wire flow reconstruction, GUI interaction, animation, stale background results, exports, and example circuits.
 
-## Create the macOS application
+### Build the apps
 
 ```bash
 pyinstaller --noconfirm circuitcanvas.spec
-open "dist/CircuitCanvas.app"
 ```
 
-The source remains Windows-compatible; a Windows executable can be built from the same spec on Windows.
+On macOS this creates `dist/CircuitCanvas.app`; on Windows, `dist/CircuitCanvas/CircuitCanvas.exe`. The icon files in [`assets/icon/`](assets/icon) are generated by `scripts/make_icon.py`.
+
+### Publish a release
+
+1. Set the new version in [`src/circuitcanvas/__init__.py`](src/circuitcanvas/__init__.py) (the only place it is defined) and describe the changes under a matching heading in [`CHANGELOG.md`](CHANGELOG.md).
+2. Push a tag with that version:
+
+   ```bash
+   git tag v0.4.0
+   git push origin v0.4.0
+   ```
+
+3. The [Release workflow](.github/workflows/release.yml) runs the checks, builds the macOS and Windows apps (and checks that each one starts), builds the Python wheel, and opens a **draft** GitHub Release with notes taken from the changelog. Review it and click **Publish**.
+
+Running the workflow by hand from the Actions tab builds the apps as downloadable artifacts without creating a release.
 
 ## Current scope
 
-Version 0.3 models one ideal DC source and arbitrary ideal-wire networks of linear R, C, and L components. It intentionally does not claim support for diodes, transistors, dependent or multiple sources, wire resistance, or frequency-domain analysis.
+Version 0.4 models one ideal DC source and arbitrary ideal-wire networks of linear R, C, and L components. It intentionally does not claim support for diodes, transistors, dependent or multiple sources, wire resistance, or frequency-domain analysis.
 
 Current inside a zero-resistance wire loop is not physically unique. CircuitCanvas therefore displays the deterministic minimum-norm wire-flow solution that satisfies every terminal injection and KCL constraint; component currents and all electrical results still come directly from MNA.
 

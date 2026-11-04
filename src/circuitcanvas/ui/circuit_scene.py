@@ -306,6 +306,18 @@ class CircuitScene(QGraphicsScene):
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
 
+    def select_only(self, component_id: str) -> None:
+        """Make one component the whole selection, so Delete and the Inspector agree."""
+        self._suppress_selection_signal = True
+        try:
+            self.clearSelection()
+            item = self.component_items.get(component_id)
+            if item is not None:
+                item.setSelected(True)
+        finally:
+            self._suppress_selection_signal = False
+        self._selection_updated()
+
     def selected_component_id(self) -> str | None:
         for item in self.selectedItems():
             if isinstance(item, ComponentItem):
@@ -334,7 +346,7 @@ class CircuitScene(QGraphicsScene):
                 target, component_kind, DEFAULT_VALUES[component_kind]
             )
         self.rebuild()
-        self.component_items[component_id].setSelected(True)
+        self.select_only(component_id)
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
 
@@ -344,7 +356,7 @@ class CircuitScene(QGraphicsScene):
             component_kind, DEFAULT_VALUES[component_kind], (position.x(), position.y())
         )
         self.rebuild()
-        self.component_items[component_id].setSelected(True)
+        self.select_only(component_id)
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
 
@@ -390,7 +402,7 @@ class CircuitScene(QGraphicsScene):
             after[1:-1],
         )
         self.rebuild()
-        self.component_items[component_id].setSelected(True)
+        self.select_only(component_id)
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
 
@@ -429,7 +441,7 @@ class CircuitScene(QGraphicsScene):
             octilinear_route(target_b, new_b),
         )
         self.rebuild()
-        self.component_items[new_id].setSelected(True)
+        self.select_only(new_id)
         self.circuit_changed.emit(self.circuit.revision)
         return new_id
 
@@ -507,7 +519,7 @@ class CircuitScene(QGraphicsScene):
             return
         self.command_stack.rotate_component(component_id)
         self.rebuild()
-        self.component_items[component_id].setSelected(True)
+        self.select_only(component_id)
         self.circuit_changed.emit(self.circuit.revision)
 
     def set_wire_currents(self, currents: dict[str, float]) -> None:
