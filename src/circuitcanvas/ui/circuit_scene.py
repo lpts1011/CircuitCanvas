@@ -32,7 +32,7 @@ from circuitcanvas.domain.wiring import EndpointRef, JunctionRef, TerminalRef
 from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.results import SimulationResult
 
-from .component_items import BatteryItem, ComponentItem, DropTargetItem
+from .component_items import BatteryItem, ComponentItem, DropTargetItem, GuideItem
 from .routing import (
     normalized_octilinear_polyline,
     octilinear_route,
@@ -52,6 +52,9 @@ DEFAULT_VALUES = {
 class CircuitScene(QGraphicsScene):
     circuit_changed = Signal(int)
     selection_changed = Signal(str)
+    #: Double-click on a component or the battery: "I want to edit this".
+    component_activated = Signal(str)
+    source_activated = Signal()
 
     def __init__(self, circuit: Circuit, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -63,6 +66,7 @@ class CircuitScene(QGraphicsScene):
         self.route_handle_items: list[RouteHandleItem] = []
         self.battery_item: BatteryItem | None = None
         self.open_target: DropTargetItem | None = None
+        self.guide_item: GuideItem | None = None
         self._wire_start: EndpointRef | None = None
         self._wire_preview: QGraphicsLineItem | None = None
         self._suppress_selection_signal = False
@@ -92,6 +96,7 @@ class CircuitScene(QGraphicsScene):
                 self._rebuild_free()
             else:
                 self._rebuild_legacy()
+            self._apply_highlight()
         finally:
             self._suppress_selection_signal = False
         self._selection_updated()
@@ -221,6 +226,16 @@ class CircuitScene(QGraphicsScene):
                 handle.moved.connect(self._route_moved)
                 self.addItem(handle)
                 self.route_handle_items.append(handle)
+
+        self.guide_item = None
+        if not self.circuit.components:
+            circuit_bounds = self.itemsBoundingRect()
+            self.guide_item = GuideItem()
+            self.guide_item.setPos(
+                circuit_bounds.center().x(),
+                circuit_bounds.top() - GuideItem.HEIGHT / 2 - 36,
+            )
+            self.addItem(self.guide_item)
 
         bounds = self.itemsBoundingRect().adjusted(-120, -120, 220, 180)
         self.setSceneRect(self.sceneRect().united(bounds))
@@ -506,17 +521,16 @@ class CircuitScene(QGraphicsScene):
         for item in self.wire_items.values():
             item.advance_phase(seconds)
 
-    def highlight_equation(self, line: EquationLine) -> None:
-        self._suppress_selection_signal = True
-        try:
-            self.clearSelection()
-            self.highlighted_components = set(line.component_ids)
-            for component_id in line.component_ids:
-                item = self.component_items.get(component_id)
-                if item is not None:
-                    item.setSelected(True)
-        finally:
-            self._suppress_selection_signal = False
+    def highlight_equation(self, line: EquationLine | None) -> None:
+        """Outline the elements of an equation without touching the selection."""
+        self.highlighted_components = set(line.component_ids) if line is not None else set()
+        self._apply_highlight()
+
+    def _apply_highlight(self) -> None:
+        for component_id, item in self.component_items.items():
+            item.set_highlighted(component_id in self.highlighted_components)
+        if self.battery_item is not None:
+            self.battery_item.set_highlighted(self.circuit.source.id in self.highlighted_components)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         item = self.itemAt(event.scenePos(), QTransform())
@@ -600,6 +614,10 @@ class CircuitScene(QGraphicsScene):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+        if isinstance(item, ComponentItem):
+            self.component_activated.emit(item.component.id)
+        elif isinstance(item, BatteryItem):
+            self.source_activated.emit()
 
     def set_result(self, result: SimulationResult, time_index: int) -> None:
         index = max(0, min(time_index, len(result.time) - 1))
@@ -609,6 +627,13 @@ class CircuitScene(QGraphicsScene):
                 item.set_measurement(float(branch.voltage[index]), float(branch.current[index]))
 
     def replace_circuit(self, circuit: Circuit) -> None:
+        # IDs such as "R1" repeat across circuits; never carry a selection over.
+        self._suppress_selection_signal = True
+        try:
+            self.clearSelection()
+        finally:
+            self._suppress_selection_signal = False
+        self.highlighted_components = set()
         self.circuit = circuit
         self.command_stack = CircuitCommandStack(circuit)
         self.rebuild()

@@ -135,7 +135,8 @@ def test_deselecting_clears_the_inspector(qtbot) -> None:
     window.scene.clearSelection()
 
     assert window.inspector.component is None
-    assert not window.inspector.isEnabled()
+    assert window.inspector.editor.isHidden()
+    assert not window.inspector.empty_hint.isHidden()
 
 
 def test_value_edit_keeps_component_selected_in_inspector(qtbot) -> None:
@@ -149,7 +150,7 @@ def test_value_edit_keeps_component_selected_in_inspector(qtbot) -> None:
 
     assert window.inspector.component is not None
     assert window.inspector.component.value == 470.0
-    assert window.inspector.isEnabled()
+    assert not window.inspector.editor.isHidden()
 
 
 def test_slider_drag_is_one_undo_step(qtbot) -> None:
@@ -281,3 +282,146 @@ def test_save_failure_is_reported_instead_of_crashing(qtbot, monkeypatch, tmp_pa
 
     assert warnings == ["Could not save circuit"]
     assert window.isWindowModified()
+
+
+def test_new_results_do_not_change_the_users_selection(qtbot) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    first = window.add_component("resistor")
+    second = window.add_component("resistor")
+    window.scene.clearSelection()
+    window.scene.component_items[first].setSelected(True)
+
+    window._update_value(first, 220.0)
+    qtbot.waitUntil(lambda: window.equations.current_line() is not None, timeout=3000)
+
+    selected = [
+        item.component.id for item in window.scene.component_items.values() if item.isSelected()
+    ]
+    assert selected == [first]
+    assert not window.scene.component_items[second].highlighted
+
+
+def test_equation_outline_only_shows_on_the_equations_tab(qtbot) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    component_id = window.add_component("resistor")
+    qtbot.waitUntil(lambda: window.equations.current_line() is not None, timeout=3000)
+    item = window.scene.component_items[component_id]
+    assert not item.highlighted
+
+    window.sidebar_tabs.setCurrentWidget(window.equations)
+    window.equations.select_equation("LAW-" + component_id)
+    assert item.highlighted
+
+    window.sidebar_tabs.setCurrentWidget(window.inspector)
+    assert not item.highlighted
+
+
+def test_slow_rc_circuit_gets_a_long_enough_time_span(qtbot) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    resistor = window.add_component("resistor")
+    capacitor = window.add_component("capacitor")
+    window._update_value(resistor, 10e3)
+    window._update_value(capacitor, 1e-3)
+
+    qtbot.waitUntil(
+        lambda: window.current_result is not None and window.current_result.time[-1] > 1,
+        timeout=3000,
+    )
+
+    assert window.analysis.span_edit.text() == "50 s"
+    assert window.analysis.span_auto.isChecked()
+
+
+def test_manual_time_span_is_undoable(qtbot) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    window.add_component("resistor")
+    window.add_component("capacitor")
+
+    window._use_manual_span(0.2)
+    assert not window.circuit.settings.auto_duration
+    assert window.circuit.settings.duration == 0.2
+
+    window.undo()
+
+    assert window.circuit.settings.auto_duration
+    assert window.analysis.span_auto.isChecked()
+
+
+def test_double_clicking_a_component_opens_its_value_for_editing(qtbot) -> None:
+    from PySide6.QtCore import QPointF
+
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    window.activateWindow()
+    component_id = window.add_component("resistor")
+    window.sidebar_tabs.setCurrentWidget(window.equations)
+    window.scene.clearSelection()
+    item = window.scene.component_items[component_id]
+    window.view.centerOn(item)
+    qtbot.wait(20)
+    point = window.view.mapFromScene(item.scenePos() + QPointF(0, -30))
+
+    with qtbot.waitSignal(window.scene.component_activated) as signal:
+        qtbot.mouseDClick(window.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    assert signal.args == [component_id]
+    assert window.sidebar_tabs.currentWidget() is window.inspector
+    assert window.scene.selected_component_id() == component_id
+    assert window.inspector.value_edit.selectedText() == window.inspector.value_edit.text()
+
+
+def test_palette_stays_visible_next_to_the_inspector(qtbot) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+
+    window.add_component("resistor")
+
+    assert window.component_palette.isVisible()
+    assert window.sidebar_tabs.currentWidget() is window.inspector
+
+
+def test_export_csv_without_selection_saves_every_component(qtbot, monkeypatch, tmp_path) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    window.add_component("resistor")
+    window.add_component("capacitor")
+    qtbot.waitUntil(lambda: window.current_result is not None, timeout=3000)
+    window.scene.clearSelection()
+    target = tmp_path / "all.csv"
+    suggested: list[str] = []
+
+    def fake_dialog(parent, caption, name, filters):
+        suggested.append(name)
+        return str(target), ""
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(fake_dialog))
+
+    window.export_csv()
+
+    assert suggested == ["circuit-data.csv"]
+    header = target.read_text(encoding="utf-8").splitlines()[0]
+    assert "R1_voltage_v" in header and "C1_current_a" in header

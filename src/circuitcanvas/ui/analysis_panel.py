@@ -14,9 +14,11 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSlider,
     QTableView,
@@ -27,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.solver.results import BranchResult
 
-from .formatting import format_si
+from .formatting import format_si, parse_quantity
 
 _INVALID_INDEX = QModelIndex()
 
@@ -74,6 +76,11 @@ class AnalysisPanel(QWidget):
     time_index_changed = Signal(int)
     play_toggled = Signal(bool)
     speed_changed = Signal(float)
+    auto_span_requested = Signal()
+    manual_span_requested = Signal(float)
+
+    MIN_SPAN_S = 1e-9
+    MAX_SPAN_S = 1e5
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -86,18 +93,42 @@ class AnalysisPanel(QWidget):
         self.metrics.setStyleSheet("color:#64748b")
         top.addWidget(self.title)
         top.addStretch()
+
+        self._span_seconds = 0.1
+        self._span_auto = True
+        span_label = QLabel("Time span")
+        span_label.setStyleSheet("color:#475569")
+        self.span_edit = QLineEdit()
+        self.span_edit.setFixedWidth(90)
+        self.span_edit.setToolTip(
+            "How much time to simulate after the battery is connected.\n"
+            "Type a value such as 50 ms, 2 s or 200u."
+        )
+        self.span_auto = QCheckBox("Auto")
+        self.span_auto.setChecked(True)
+        self.span_auto.setToolTip(
+            "Pick the time span from the circuit's time constants,\n"
+            "so the whole charge, decay or oscillation is visible."
+        )
+        top.addWidget(span_label)
+        top.addWidget(self.span_edit)
+        top.addWidget(self.span_auto)
+        top.addSpacing(12)
+
         self.play_button = QPushButton("▶ Play")
         self.play_button.setCheckable(True)
+        self.play_button.setToolTip("Animate the response over time (the arrows show current flow)")
         self.speed_control = QDoubleSpinBox()
         self.speed_control.setRange(0.1, 10.0)
         self.speed_control.setSingleStep(0.5)
         self.speed_control.setValue(1.0)
         self.speed_control.setSuffix("×")
         self.speed_control.setFixedWidth(75)
+        self.speed_control.setToolTip("Playback speed")
         top.addWidget(self.play_button)
         top.addWidget(self.speed_control)
-        top.addWidget(self.metrics)
         layout.addLayout(top)
+        layout.addWidget(self.metrics)
 
         self.tabs = QTabWidget()
         plot_container = QWidget()
@@ -136,6 +167,49 @@ class AnalysisPanel(QWidget):
         self.time_slider.valueChanged.connect(self.time_index_changed.emit)
         self.play_button.toggled.connect(self._play_toggled)
         self.speed_control.valueChanged.connect(self.speed_changed.emit)
+        self.span_edit.editingFinished.connect(self._span_edited)
+        self.span_auto.clicked.connect(self._span_auto_clicked)
+        self.show_time_span(self._span_seconds, auto=True)
+
+    def show_time_span(self, seconds: float, *, auto: bool) -> None:
+        """Display the span used by the latest simulation without emitting requests."""
+        self._span_seconds = seconds
+        self._span_auto = auto
+        self.span_edit.setText(format_si(seconds, "s", digits=3))
+        self.span_auto.blockSignals(True)
+        self.span_auto.setChecked(auto)
+        self.span_auto.blockSignals(False)
+        self.span_edit.setStyleSheet("")
+
+    def _span_edited(self) -> None:
+        text = self.span_edit.text()
+        if text == format_si(self._span_seconds, "s", digits=3):
+            return
+        try:
+            parsed = parse_quantity(text, "s")
+        except ValueError:
+            self.span_edit.setStyleSheet("border:1px solid #dc2626")
+            self.span_edit.setToolTip("Could not read that time. Try 50 ms, 2 s or 200u.")
+            return
+        # A bare number keeps the unit that was on screen ("50" after "25 ms" is 50 ms).
+        seconds = parsed.value if parsed.scaled else parsed.value * self._display_factor()
+        seconds = min(self.MAX_SPAN_S, max(self.MIN_SPAN_S, seconds))
+        self.show_time_span(seconds, auto=False)
+        self.manual_span_requested.emit(seconds)
+
+    @property
+    def time_span(self) -> float:
+        return self._span_seconds
+
+    def _display_factor(self) -> float:
+        unit = format_si(self._span_seconds, "s", digits=3).split()[-1]
+        return parse_quantity(f"1 {unit}", "s").value
+
+    def _span_auto_clicked(self, checked: bool) -> None:
+        if checked:
+            self.auto_span_requested.emit()
+        else:
+            self.manual_span_requested.emit(self._span_seconds)
 
     def _play_toggled(self, playing: bool) -> None:
         self.play_button.setText("⏸ Pause" if playing else "▶ Play")

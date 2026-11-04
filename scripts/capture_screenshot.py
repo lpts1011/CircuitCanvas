@@ -11,7 +11,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from circuitcanvas.app import configure_application
-from circuitcanvas.domain.serialization import load_circuit
+from circuitcanvas.examples import EXAMPLES, load_example
 from circuitcanvas.ui.main_window import MainWindow
 
 
@@ -20,7 +20,8 @@ def main() -> int:
     configure_application(app)
     window = MainWindow(debounce_ms=0)
     window.resize(1600, 960)
-    window._replace_circuit(load_circuit("examples/parallel-series-17v.json"))
+    example = next(item for item in EXAMPLES if item.filename == "parallel-series-17v.json")
+    window._replace_circuit(load_example(example))
     window.scene.component_items["R1"].setSelected(True)
     window.sidebar_tabs.setCurrentWidget(window.equations)
     window.show()

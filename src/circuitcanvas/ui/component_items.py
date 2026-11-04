@@ -17,26 +17,43 @@ from circuitcanvas.domain.wiring import TerminalRef
 from .formatting import format_component_value, format_si
 from .wire_items import TerminalItem
 
+HIGHLIGHT_FILL = "#fef3c7"
+HIGHLIGHT_EDGE = "#d97706"
+
 
 class BatteryItem(QGraphicsObject):
     def __init__(self, voltage: float, source_id: str = "V1") -> None:
         super().__init__()
         self.voltage = voltage
+        self.highlighted = False
         self.terminals = {
             "a": TerminalItem(TerminalRef(source_id, "a"), self),
             "b": TerminalItem(TerminalRef(source_id, "b"), self),
         }
         self.terminals["a"].setPos(0, -70)
         self.terminals["b"].setPos(0, 70)
+        self.setToolTip(
+            f"Battery: {format_si(voltage, 'V')} DC, switched on at t = 0.\n"
+            "Double-click to change the voltage."
+        )
 
     def boundingRect(self) -> QRectF:
         return QRectF(-42, -70, 84, 140)
+
+    def set_highlighted(self, highlighted: bool) -> None:
+        if highlighted != self.highlighted:
+            self.highlighted = highlighted
+            self.update()
 
     def paint(
         self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None
     ) -> None:
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.highlighted:
+            painter.setBrush(QColor(HIGHLIGHT_FILL))
+            painter.setPen(QPen(QColor(HIGHLIGHT_EDGE), 2, Qt.PenStyle.DashLine))
+            painter.drawRoundedRect(self.boundingRect().adjusted(1, 1, -1, -1), 10, 10)
         painter.setPen(QPen(QColor("#3b82f6"), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawLine(QPointF(-24, -14), QPointF(24, -14))
         painter.drawLine(QPointF(-14, 16), QPointF(14, 16))
@@ -51,6 +68,52 @@ class BatteryItem(QGraphicsObject):
         )
         painter.drawText(QRectF(-38, -7, 16, 16), Qt.AlignmentFlag.AlignCenter, "+")
         painter.drawText(QRectF(-38, 20, 16, 16), Qt.AlignmentFlag.AlignCenter, "−")
+
+
+class GuideItem(QGraphicsObject):
+    """A "start here" card shown on a circuit that has no components yet."""
+
+    WIDTH = 540.0
+    HEIGHT = 118.0
+    LINES = (
+        ("Start here", True),
+        ("1   Click Resistor, Capacitor or Inductor on the right, or drag one onto a wire.", False),
+        (
+            "2   It is solved instantly: voltages, currents and graphs follow your edits.",
+            False,
+        ),
+        ("Need more?  Help ▸ Quick Start Guide, or File ▸ Open Example.", False),
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setZValue(10)
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(-self.WIDTH / 2, -self.HEIGHT / 2, self.WIDTH, self.HEIGHT)
+
+    def paint(
+        self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None
+    ) -> None:
+        del option, widget
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#93c5fd"), 1.5))
+        painter.setBrush(QColor("#eff6ff"))
+        painter.drawRoundedRect(self.boundingRect(), 14, 14)
+        y = -self.HEIGHT / 2 + 14
+        for text, heading in self.LINES:
+            font = QFont("Arial", 12 if heading else 10)
+            font.setWeight(QFont.Weight.Bold if heading else QFont.Weight.Normal)
+            painter.setFont(font)
+            painter.setPen(QColor("#1e3a8a" if heading else "#334155"))
+            height = 26.0 if heading else 22.0
+            painter.drawText(
+                QRectF(-self.WIDTH / 2 + 20, y, self.WIDTH - 40, height),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                text,
+            )
+            y += height
 
 
 class DropTargetItem(QGraphicsObject):
@@ -81,6 +144,9 @@ class ComponentItem(QGraphicsObject):
         super().__init__()
         self.component = component
         self.measurement_text = "V —  ·  I —"
+        # Equation highlight is separate from selection so it never changes
+        # what Delete or Rotate act on.
+        self.highlighted = False
         self.terminals = {
             "a": TerminalItem(TerminalRef(component.id, "a"), self),
             "b": TerminalItem(TerminalRef(component.id, "b"), self),
@@ -92,9 +158,18 @@ class ComponentItem(QGraphicsObject):
             | QGraphicsObject.GraphicsItemFlag.ItemIsMovable
         )
         self.setCursor(Qt.CursorShape.SizeAllCursor)
+        self.setToolTip(
+            f"{component.kind.value.capitalize()} {component.id}: drag to move · "
+            "double-click to edit the value · R to rotate"
+        )
 
     def boundingRect(self) -> QRectF:
         return QRectF(-84, -49, 168, 98)
+
+    def set_highlighted(self, highlighted: bool) -> None:
+        if highlighted != self.highlighted:
+            self.highlighted = highlighted
+            self.update()
 
     def set_measurement(self, voltage: float, current: float) -> None:
         self.measurement_text = f"{format_si(voltage, 'V')}  ·  {format_si(current, 'A')}"
@@ -139,6 +214,10 @@ class ComponentItem(QGraphicsObject):
         if self.isSelected():
             painter.setBrush(QColor("#dbeafe"))
             painter.setPen(QPen(QColor("#2563eb"), 2))
+            painter.drawRoundedRect(self.boundingRect(), 12, 12)
+        elif self.highlighted:
+            painter.setBrush(QColor(HIGHLIGHT_FILL))
+            painter.setPen(QPen(QColor(HIGHLIGHT_EDGE), 2, Qt.PenStyle.DashLine))
             painter.drawRoundedRect(self.boundingRect(), 12, 12)
         else:
             painter.setBrush(QColor(background))

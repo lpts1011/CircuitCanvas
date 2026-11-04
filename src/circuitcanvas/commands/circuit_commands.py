@@ -7,7 +7,7 @@ from collections.abc import Callable, Hashable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 
-from circuitcanvas.domain.circuit import Circuit
+from circuitcanvas.domain.circuit import Circuit, SimulationSettings
 from circuitcanvas.domain.components import (
     Component,
     ComponentKind,
@@ -163,6 +163,7 @@ def delete_elements(
 @dataclass(slots=True)
 class _CircuitState:
     source: VoltageSource
+    settings: SimulationSettings
     components: dict[str, Component]
     nodes: set[str]
     positions: dict[str, tuple[float, float]]
@@ -178,6 +179,7 @@ class _CircuitState:
     def capture(cls, circuit: Circuit) -> _CircuitState:
         return cls(
             circuit.source,
+            circuit.settings,
             deepcopy(circuit.components),
             set(circuit.nodes),
             dict(circuit.positions),
@@ -192,6 +194,7 @@ class _CircuitState:
 
     def restore(self, circuit: Circuit) -> None:
         circuit.source = self.source
+        circuit.settings = self.settings
         circuit.components = deepcopy(self.components)
         circuit.nodes = set(self.nodes)
         circuit.positions = dict(self.positions)
@@ -269,6 +272,13 @@ class CircuitCommandStack:
         self, component_id: str, value: float, *, merge_key: Hashable | None = None
     ) -> None:
         self._execute(lambda: update_component_value(self.circuit, component_id, value), merge_key)
+
+    def set_simulation_settings(self, settings: SimulationSettings) -> None:
+        def operation() -> None:
+            self.circuit.settings = settings
+            self.circuit.touch()
+
+        self._execute(operation)
 
     def set_source_voltage(self, voltage: float, *, merge_key: Hashable | None = None) -> None:
         def operation() -> None:

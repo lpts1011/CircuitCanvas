@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 from scipy.linalg import LinAlgError, lu_factor, lu_solve  # type: ignore[import-untyped]
 
-from circuitcanvas.domain.circuit import CircuitSnapshot
+from circuitcanvas.domain.circuit import CircuitSnapshot, SimulationSettings
 from circuitcanvas.domain.components import Capacitor, Resistor
 
 from .mna import MNASystem, assemble
 from .results import BranchResult, SimulationResult
+from .timescale import estimate_time_span
 from .validation import validate
 
 
@@ -24,10 +27,17 @@ def _node_voltage(system: MNASystem, state: np.ndarray, node: str) -> np.ndarray
     return state[:, index]
 
 
+def resolve_settings(settings: SimulationSettings, system: MNASystem) -> SimulationSettings:
+    """Replace the span with one fitted to the circuit when automatic spans are on."""
+    if not settings.auto_duration:
+        return settings
+    span = estimate_time_span(system)
+    return settings if span is None else replace(settings, duration=span)
+
+
 def _solve_state(
-    snapshot: CircuitSnapshot, system: MNASystem
+    settings: SimulationSettings, system: MNASystem
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    settings = snapshot.settings
     time = np.linspace(0.0, settings.duration, settings.samples, dtype=float)
     dt = float(time[1] - time[0])
     state = np.zeros((settings.samples, system.g.shape[0]), dtype=float)
@@ -82,7 +92,7 @@ def simulate(snapshot: CircuitSnapshot) -> SimulationResult:
         raise CircuitSimulationError(diagnostics[0].message)
 
     system = assemble(snapshot)
-    time, state, residual = _solve_state(snapshot, system)
+    time, state, residual = _solve_state(resolve_settings(snapshot.settings, system), system)
     dt = float(time[1] - time[0])
     node_voltages = {node: _node_voltage(system, state, node) for node in snapshot.nodes}
     branches: dict[str, BranchResult] = {}

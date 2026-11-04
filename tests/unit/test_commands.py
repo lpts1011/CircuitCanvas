@@ -256,3 +256,17 @@ def test_delete_elements_handles_component_and_its_wire_in_one_step() -> None:
     assert stack.undo()
     assert resistor in circuit.components
     assert wire in circuit.wires
+
+
+def test_simulation_settings_are_part_of_undo_history() -> None:
+    from dataclasses import replace
+
+    circuit = Circuit.new()
+    stack = CircuitCommandStack(circuit)
+    original = circuit.settings
+
+    stack.set_simulation_settings(replace(original, duration=2.0, auto_duration=False))
+    assert circuit.settings.duration == 2.0
+
+    assert stack.undo()
+    assert circuit.settings == original
