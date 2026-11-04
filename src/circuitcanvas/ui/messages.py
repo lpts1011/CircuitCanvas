@@ -43,10 +43,11 @@ def describe(diagnostic: Diagnostic, *, has_components: bool) -> Problem:
         )
     if code == "dangling-terminal":
         verb = "has an end" if len(ids) == 1 else "have ends"
+        pronoun = "it" if len(ids) == 1 else "them"
         return Problem(
             "problem",
-            f"{_names(ids)} {verb} that isn't connected. Drag from an orange dot "
-            "to another dot or onto a wire.",
+            f"{_names(ids)} {verb} that isn't connected. Drag {pronoun} onto a wire to "
+            f"put {pronoun} in the circuit, or drag from an orange dot to another dot.",
             ids,
         )
     if code == "dangling-wire":

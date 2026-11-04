@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
     QNativeGestureEvent,
@@ -295,9 +296,24 @@ class CircuitScene(QGraphicsScene):
         return None
 
     def _component_moved(self, component_id: str, x: float, y: float) -> None:
+        self.set_drop_highlight(None)
+        if self.circuit.positions.get(component_id) == (x, y):
+            return  # A click, not a move: nothing changed.
+        if self.is_unwired(component_id):
+            target = self.nearest_wire(QPointF(x, y), self.SNAP_DISTANCE)
+            if target is not None:
+                self.splice_into_wire(component_id, target[0], target[1])
+                return
         self.command_stack.move_component(component_id, (x, y))
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
+
+    def component_dragging(self, item: ComponentItem) -> None:
+        """While a loose component is dragged, light up the wire it would join."""
+        if not self.is_unwired(item.component.id):
+            return
+        target = self.nearest_wire(item.scenePos(), self.SNAP_DISTANCE)
+        self.set_drop_highlight(target[0] if target is not None else None)
 
     def _junction_moved(self, junction_id: str, x: float, y: float) -> None:
         candidates = []
@@ -307,13 +323,20 @@ class CircuitScene(QGraphicsScene):
                 candidates.append(project_to_polyline((x, y), self._stored_wire_polyline(wire_id)))
         previous = self.circuit.junctions[junction_id].position
         constrained = min(candidates, key=lambda point: math.dist(point, (x, y)), default=previous)
+        if constrained == previous:
+            self.rebuild()  # Snap the dot back onto its wire without an undo step.
+            return
         self.command_stack.move_junction(junction_id, constrained)
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
 
     def _route_moved(self, wire_id: str, route_index: int, x: float, y: float) -> None:
         route = list(self.circuit.wires[wire_id].route)
-        route[route_index] = project_to_polyline((x, y), self._stored_wire_polyline(wire_id))
+        moved = project_to_polyline((x, y), self._stored_wire_polyline(wire_id))
+        if moved == route[route_index]:
+            self.rebuild()
+            return
+        route[route_index] = moved
         self.command_stack.set_wire_route(wire_id, tuple(route))
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
@@ -372,11 +395,69 @@ class CircuitScene(QGraphicsScene):
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
 
-    def place_component(self, kind: ComponentKind | str, position: QPointF) -> str:
-        item = self.itemAt(position, QTransform())
-        if isinstance(item, WireItem):
-            return self.insert_component_on_wire(kind, item.wire.id, position)
+    #: A component dropped this close to a wire (in scene units at 100 % zoom) joins it.
+    SNAP_DISTANCE = 28.0
+
+    def place_component(
+        self, kind: ComponentKind | str, position: QPointF, tolerance: float | None = None
+    ) -> str:
+        """Drop a new component: into the nearest wire if close enough, else loose."""
+        target = self.nearest_wire(position, self.SNAP_DISTANCE if tolerance is None else tolerance)
+        if target is not None:
+            return self.insert_component_on_wire(kind, target[0], target[1])
         return self.insert_component_at(kind, position)
+
+    def nearest_wire(self, position: QPointF, tolerance: float) -> tuple[str, QPointF] | None:
+        """The closest wire within ``tolerance`` and the closest point on it."""
+        point = (position.x(), position.y())
+        best: tuple[float, str, tuple[float, float]] | None = None
+        for wire_id, item in self.wire_items.items():
+            polyline = tuple((p.x(), p.y()) for p in item.polyline_points())
+            if len(polyline) < 2:
+                continue
+            projected = project_to_polyline(point, polyline)
+            distance = math.dist(point, projected)
+            if distance <= tolerance and (best is None or distance < best[0]):
+                best = (distance, wire_id, projected)
+        if best is None:
+            return None
+        return best[1], QPointF(*best[2])
+
+    def is_unwired(self, component_id: str) -> bool:
+        terminals = {TerminalRef(component_id, "a"), TerminalRef(component_id, "b")}
+        return not any(
+            endpoint in terminals
+            for wire in self.circuit.wires.values()
+            for endpoint in (wire.start, wire.end)
+        )
+
+    def set_drop_highlight(self, wire_id: str | None) -> None:
+        for candidate, item in self.wire_items.items():
+            item.set_drop_target(candidate == wire_id)
+
+    def splice_into_wire(self, component_id: str, wire_id: str, position: QPointF) -> None:
+        center, rotation, before, after = self._wire_split(wire_id, position)
+        self.command_stack.splice_component_into_wire(
+            component_id, wire_id, center, rotation, before, after
+        )
+        self.rebuild()
+        self.select_only(component_id)
+        self.circuit_changed.emit(self.circuit.revision)
+
+    def _wire_split(
+        self, wire_id: str, position: QPointF
+    ) -> tuple[
+        tuple[float, float], int, tuple[tuple[float, float], ...], tuple[tuple[float, float], ...]
+    ]:
+        """Where a component inserted at ``position`` sits, its rotation, and both new routes."""
+        polyline = self._stored_wire_polyline(wire_id)
+        if len(polyline) < 2:
+            raise ValueError("Cannot insert a component on a zero-length wire")
+        before, after = split_polyline(polyline, (position.x(), position.y()))
+        start = before[-2]
+        end = after[1]
+        vertical = abs(end[0] - start[0]) < 1.0 and abs(end[1] - start[1]) >= 1.0
+        return before[-1], 90 if vertical else 0, before[1:-1], after[1:-1]
 
     def best_wire_insertion(self) -> tuple[str, QPointF]:
         candidates: list[tuple[float, str, QPointF]] = []
@@ -394,24 +475,15 @@ class CircuitScene(QGraphicsScene):
         self, kind: ComponentKind | str, wire_id: str, position: QPointF
     ) -> str:
         component_kind = kind if isinstance(kind, ComponentKind) else ComponentKind(kind)
-        polyline = self._stored_wire_polyline(wire_id)
-        pointer = (position.x(), position.y())
-        if len(polyline) < 2:
-            raise ValueError("Cannot insert a component on a zero-length wire")
-        before, after = split_polyline(polyline, pointer)
-        center = before[-1]
-        start = before[-2]
-        end = after[1]
-        vertical = abs(end[0] - start[0]) < 1.0 and abs(end[1] - start[1]) >= 1.0
-        rotation = 90 if vertical else 0
+        center, rotation, before, after = self._wire_split(wire_id, position)
         component_id = self.command_stack.insert_component_on_wire(
             wire_id,
             component_kind,
             DEFAULT_VALUES[component_kind],
             center,
             rotation,
-            before[1:-1],
-            after[1:-1],
+            before,
+            after,
         )
         self.rebuild()
         self.select_only(component_id)
@@ -950,11 +1022,27 @@ class CircuitView(QGraphicsView):
         else:
             super().dragEnterEvent(event)
 
+    def _snap_tolerance(self) -> float:
+        """The snap distance in scene units, so it feels the same at any zoom."""
+        return CircuitScene.SNAP_DISTANCE / max(self.zoom_level, 1e-6)
+
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        if event.mimeData().hasFormat("application/x-circuitcanvas-component"):
-            event.acceptProposedAction()
-        else:
+        if not event.mimeData().hasFormat("application/x-circuitcanvas-component"):
             super().dragMoveEvent(event)
+            return
+        event.acceptProposedAction()
+        scene = self.scene()
+        if isinstance(scene, CircuitScene):
+            target = scene.nearest_wire(
+                self.mapToScene(event.position().toPoint()), self._snap_tolerance()
+            )
+            scene.set_drop_highlight(target[0] if target is not None else None)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        scene = self.scene()
+        if isinstance(scene, CircuitScene):
+            scene.set_drop_highlight(None)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:
         if not event.mimeData().hasFormat("application/x-circuitcanvas-component"):
@@ -965,5 +1053,6 @@ class CircuitView(QGraphicsView):
         scene = self.scene()
         assert isinstance(scene, CircuitScene)
         scene_pos = self.mapToScene(event.position().toPoint())
-        scene.place_component(kind, scene_pos)
+        scene.set_drop_highlight(None)
+        scene.place_component(kind, scene_pos, self._snap_tolerance())
         event.acceptProposedAction()

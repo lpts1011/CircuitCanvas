@@ -120,6 +120,8 @@ class WireItem(QGraphicsObject):
         self.current = 0.0
         self.phase = 0.0
         self.stale = True
+        #: Glows while a dragged component would be inserted here.
+        self.drop_target = False
         raw_points = (
             (start.x(), start.y()),
             *wire.route,
@@ -166,6 +168,11 @@ class WireItem(QGraphicsObject):
         self.stale = False
         self.update()
 
+    def set_drop_target(self, target: bool) -> None:
+        if target != self.drop_target:
+            self.drop_target = target
+            self.update()
+
     def set_stale(self, stale: bool) -> None:
         self.stale = stale
         self.update()
@@ -188,9 +195,22 @@ class WireItem(QGraphicsObject):
     ) -> None:
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.drop_target:
+            glow = QColor("#2563eb")
+            glow.setAlpha(70)
+            painter.setPen(
+                QPen(
+                    glow,
+                    16,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            painter.drawPath(self._path)
         painter.setPen(
             QPen(
-                QColor("#2563eb" if self.isSelected() else "#334155"),
+                QColor("#2563eb" if self.isSelected() or self.drop_target else "#334155"),
                 4,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,
