@@ -32,8 +32,8 @@ The application does not call an external circuit simulator. Its Python solver a
 - Independent voltage and current axes with a shared time cursor
 - Data table for time, voltage, current, power, and stored energy
 - Circuit totals for source current, source power, and reactive energy
-- Versioned JSON save/load plus CSV and PNG export
-- Undo/redo and revision-safe background calculation
+- Versioned JSON save/load plus CSV and PNG export, with an unsaved-changes prompt
+- Undo/redo (a whole slider drag or voltage edit is one step) and revision-safe background calculation
 - Specific diagnostics for open, floating, singular, and non-finite circuits
 - Analytical tests against closed-form RC and RL solutions
 
@@ -58,10 +58,11 @@ On Windows, activate the environment with `.venv\Scripts\activate` before runnin
 3. Select a component and choose **Add parallel** to create a fully wired parallel branch, or place a component away from a wire and connect it manually.
 4. Drag an orange terminal dot to another terminal to make a connection. Drop a new wire onto an existing wire to create a real electrical junction; a visual crossing without a junction dot remains disconnected.
 5. Shift-drag a junction dot to continue wiring from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
-6. Select a component and use **Rotate** (or `R`), **Delete**/**Backspace**, the value field, or the logarithmic slider.
-7. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation highlights its circuit elements.
-8. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
-9. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result.
+6. Select a component and use **Rotate** (or `R`), the value field, or the logarithmic slider. **Delete**/**Backspace** removes whatever is selected: components, wires, junction dots, or bend handles.
+7. Scroll (or two-finger swipe) to pan the canvas. Zoom with ⌘/Ctrl + scroll, a trackpad pinch, or ⌘/Ctrl `+`/`−`; **Fit view** (⌘/Ctrl `0`) shows the whole circuit again.
+8. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation highlights its circuit elements.
+9. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
+10. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result.
 
 Five ready-to-run circuits are included in [`examples/`](examples), including [`parallel-series-17v.json`](examples/parallel-series-17v.json), where a 200 Ω resistor is parallel with a 100 Ω + 100 Ω series branch.
 

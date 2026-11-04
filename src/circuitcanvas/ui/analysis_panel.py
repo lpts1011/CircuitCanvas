@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.solver.results import BranchResult
 
+from .formatting import format_si
+
 _INVALID_INDEX = QModelIndex()
 
 
@@ -158,8 +160,9 @@ class AnalysisPanel(QWidget):
         self.time_slider.setRange(0, max(0, len(time) - 1))
         self.time_slider.setValue(max(0, len(time) - 1))
         self.metrics.setText(
-            f"Peak |I| {np.max(np.abs(branch.current)):.4g} A   ·   "
-            f"Final V {branch.voltage[-1]:.4g} V   ·   Energy {branch.energy[-1]:.4g} J"
+            f"Peak current {format_si(float(np.max(np.abs(branch.current))), 'A')}   ·   "
+            f"Final voltage {format_si(float(branch.voltage[-1]), 'V')}   ·   "
+            f"Stored energy {format_si(float(branch.energy[-1]), 'J')}"
         )
 
     def clear(self) -> None:

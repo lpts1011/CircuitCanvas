@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.domain.components import Capacitor, Component, Inductor
 
+from .formatting import format_component_value
+
 _UNITS = {
     "resistor": {"Ω": 1.0, "kΩ": 1e3, "MΩ": 1e6},
     "capacitor": {"pF": 1e-12, "nF": 1e-9, "μF": 1e-6, "mF": 1e-3, "F": 1.0},
@@ -34,6 +36,9 @@ _RANGES = {
 
 class ComponentInspector(QWidget):
     value_changed = Signal(str, float)
+    # Slider moves carry a session number; equal numbers belong to one gesture
+    # and are recorded as a single undo step.
+    value_adjusted = Signal(str, float, int)
     delete_requested = Signal(str)
     rotate_requested = Signal(str)
     parallel_requested = Signal(str)
@@ -42,6 +47,7 @@ class ComponentInspector(QWidget):
         super().__init__(parent)
         self.component: Component | None = None
         self._si_value = 0.0
+        self._slider_session = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -86,12 +92,15 @@ class ComponentInspector(QWidget):
         self.value_edit.editingFinished.connect(self._commit_value)
         self.unit_combo.currentTextChanged.connect(self._unit_changed)
         self.slider.valueChanged.connect(self._slider_changed)
+        self.slider.sliderPressed.connect(self._start_slider_session)
         self.delete_button.clicked.connect(self._delete)
         self.rotate_button.clicked.connect(self._rotate)
         self.parallel_button.clicked.connect(self._parallel)
         self.setEnabled(False)
 
     def set_component(self, component: Component) -> None:
+        if self.component is None or self.component.id != component.id:
+            self._start_slider_session()
         self.component = component
         self._si_value = component.value
         self.setEnabled(True)
@@ -106,13 +115,19 @@ class ComponentInspector(QWidget):
         self._show_si_value()
         self.sync_slider_to_value()
         low, high = _RANGES[component.kind.value]
-        self.range_label.setText(f"Range: {low:g} to {high:g} SI")
+        kind = component.kind.value
+        self.range_label.setText(
+            f"Slider range: {format_component_value(kind, low)}"
+            f" – {format_component_value(kind, high)}"
+        )
         self.error_label.clear()
 
     def clear_component(self) -> None:
         self.component = None
         self.heading.setText("SELECT A COMPONENT")
         self.value_edit.clear()
+        self.range_label.clear()
+        self.error_label.clear()
         self.setEnabled(False)
 
     def _preferred_unit(self, component: Component) -> str:
@@ -158,6 +173,7 @@ class ComponentInspector(QWidget):
             return
         self.error_label.clear()
         self._si_value = value
+        self._start_slider_session()
         self.sync_slider_to_value()
         self.value_changed.emit(self.component.id, value)
 
@@ -180,7 +196,10 @@ class ComponentInspector(QWidget):
         exponent = math.log10(low) + position / 1000 * (math.log10(high) - math.log10(low))
         self._si_value = 10**exponent
         self._show_si_value()
-        self.value_changed.emit(self.component.id, self._si_value)
+        self.value_adjusted.emit(self.component.id, self._si_value, self._slider_session)
+
+    def _start_slider_session(self) -> None:
+        self._slider_session += 1
 
     def _delete(self) -> None:
         if self.component is not None:

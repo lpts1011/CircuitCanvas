@@ -5,12 +5,13 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
-from PySide6.QtCore import QObject, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
+    QNativeGestureEvent,
     QPainter,
     QPen,
     QTransform,
@@ -83,10 +84,17 @@ class CircuitScene(QGraphicsScene):
             painter.drawLine(int(rect_f.left()), y, int(rect_f.right()), y)
 
     def rebuild(self) -> None:
-        if self._uses_free_wiring():
-            self._rebuild_free()
-        else:
-            self._rebuild_legacy()
+        # Clearing and recreating items fires several transient selection changes;
+        # report only the selection that survives the rebuild.
+        self._suppress_selection_signal = True
+        try:
+            if self._uses_free_wiring():
+                self._rebuild_free()
+            else:
+                self._rebuild_legacy()
+        finally:
+            self._suppress_selection_signal = False
+        self._selection_updated()
 
     def _uses_free_wiring(self) -> bool:
         return bool(
@@ -290,11 +298,10 @@ class CircuitScene(QGraphicsScene):
         return None
 
     def _selection_updated(self) -> None:
+        """Emit the selected component ID, or an empty string when none is selected."""
         if self._suppress_selection_signal:
             return
-        selected = self.selected_component_id()
-        if selected is not None:
-            self.selection_changed.emit(selected)
+        self.selection_changed.emit(self.selected_component_id() or "")
 
     def insert_component_for_test(
         self, kind: ComponentKind | str, *, parallel_to: str | None = None
@@ -453,9 +460,35 @@ class CircuitScene(QGraphicsScene):
         self.circuit_changed.emit(self.circuit.revision)
         return junction_id
 
+    def delete_selected(self) -> bool:
+        """Delete every selected component, wire, junction, and bend as one undo step."""
+        components: list[str] = []
+        wires: list[str] = []
+        junctions: list[str] = []
+        bends: list[tuple[str, int]] = []
+        for item in self.selectedItems():
+            if isinstance(item, ComponentItem):
+                components.append(item.component.id)
+            elif isinstance(item, WireItem):
+                wires.append(item.wire.id)
+            elif isinstance(item, JunctionItem):
+                junctions.append(item.junction_id)
+            elif isinstance(item, RouteHandleItem):
+                bends.append((item.wire_id, item.route_index))
+        if not (components or wires or junctions or bends):
+            return False
+        self.command_stack.delete_elements(components, wires, junctions, bends)
+        self.rebuild()
+        self.circuit_changed.emit(self.circuit.revision)
+        return True
+
     def rotate_selected(self) -> None:
         component_id = self.selected_component_id()
-        if component_id is None:
+        if component_id is not None:
+            self.rotate_component(component_id)
+
+    def rotate_component(self, component_id: str) -> None:
+        if component_id not in self.circuit.components:
             return
         self.command_stack.rotate_component(component_id)
         self.rebuild()
@@ -582,7 +615,16 @@ class CircuitScene(QGraphicsScene):
 
 
 class CircuitView(QGraphicsView):
-    """Zoomable view that accepts component MIME drops."""
+    """Pannable, zoomable view that accepts component MIME drops.
+
+    Plain wheel and two-finger trackpad scrolling pan the canvas. Zooming uses
+    Ctrl/Cmd + wheel, a trackpad pinch, or the zoom actions, and stays between
+    ``MIN_ZOOM`` and ``MAX_ZOOM`` so the circuit can never vanish.
+    """
+
+    MIN_ZOOM = 0.2
+    MAX_ZOOM = 4.0
+    FIT_MARGIN = 48.0
 
     def __init__(self, scene: CircuitScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
@@ -591,9 +633,77 @@ class CircuitView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
 
+    @property
+    def zoom_level(self) -> float:
+        return self.transform().m11()
+
+    def zoom_by(self, factor: float, *, under_mouse: bool = False) -> None:
+        current = self.zoom_level
+        target = min(self.MAX_ZOOM, max(self.MIN_ZOOM, current * factor))
+        if math.isclose(target, current, rel_tol=1e-9):
+            return
+        anchor = (
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse
+            if under_mouse
+            else QGraphicsView.ViewportAnchor.AnchorViewCenter
+        )
+        previous_anchor = self.transformationAnchor()
+        self.setTransformationAnchor(anchor)
+        self.scale(target / current, target / current)
+        self.setTransformationAnchor(previous_anchor)
+
+    def zoom_in(self) -> None:
+        self.zoom_by(1.25)
+
+    def zoom_out(self) -> None:
+        self.zoom_by(1 / 1.25)
+
+    def fit_circuit(self) -> None:
+        """Show the whole circuit, never magnifying a small one beyond 100 %."""
+        scene = self.scene()
+        if scene is None:
+            return
+        bounds = scene.itemsBoundingRect()
+        if bounds.isEmpty():
+            return
+        margin = self.FIT_MARGIN
+        bounds = bounds.adjusted(-margin, -margin, margin, margin)
+        self.resetTransform()
+        self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+        fitted = self.zoom_level
+        clamped = min(1.0, max(self.MIN_ZOOM, fitted))
+        if not math.isclose(clamped, fitted, rel_tol=1e-9):
+            self.resetTransform()
+            self.scale(clamped, clamped)
+        self.centerOn(bounds.center())
+
     def wheelEvent(self, event: QWheelEvent) -> None:
-        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
-        self.scale(factor, factor)
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y() or event.pixelDelta().y()
+            if delta:
+                self.zoom_by(1.15 ** (delta / 120.0), under_mouse=True)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        if self._handle_pinch(event):
+            return True
+        return super().viewportEvent(event)
+
+    def event(self, event: QEvent) -> bool:
+        if self._handle_pinch(event):
+            return True
+        return super().event(event)
+
+    def _handle_pinch(self, event: QEvent) -> bool:
+        if event.type() != QEvent.Type.NativeGesture or not isinstance(event, QNativeGestureEvent):
+            return False
+        if event.gestureType() != Qt.NativeGestureType.ZoomNativeGesture:
+            return False
+        self.zoom_by(1.0 + event.value(), under_mouse=True)
+        event.accept()
+        return True
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasFormat("application/x-circuitcanvas-component"):

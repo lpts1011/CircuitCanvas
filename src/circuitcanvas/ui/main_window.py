@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
@@ -33,6 +33,7 @@ from .analysis_panel import AnalysisPanel
 from .circuit_scene import CircuitScene, CircuitView
 from .equation_panel import EquationPanel
 from .export import export_branch_csv, export_scene_png
+from .formatting import format_si
 from .inspector import ComponentInspector
 from .palette import ComponentPalette
 from .playback import PlaybackController
@@ -42,12 +43,13 @@ from .simulation_controller import SimulationController
 class MainWindow(QMainWindow):
     def __init__(self, *, debounce_ms: int = 150) -> None:
         super().__init__()
-        self.setWindowTitle("CircuitCanvas — Interactive RLC Simulator")
         self.resize(1420, 880)
         self.circuit = Circuit.starter_loop(12.0)
         self.current_result: SimulationResult | None = None
         self.current_time_index = 0
         self._current_path: Path | None = None
+        self._source_edit_session = 0
+        self._initial_fit_done = False
 
         self.scene = CircuitScene(self.circuit)
         self.view = CircuitView(self.scene)
@@ -61,7 +63,33 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_layout()
         self._connect_signals()
+        # Shows toolbar hints on hover and confirmations such as "Saved …".
+        self.statusBar().setSizeGripEnabled(False)
+        self._update_title()
         self.controller.request(self.circuit.revision, self.circuit.snapshot())
+
+    def _action(
+        self,
+        text: str,
+        slot: Callable[[], object],
+        tip: str,
+        shortcuts: Sequence[QKeySequence | QKeySequence.StandardKey | str] = (),
+    ) -> QAction:
+        action = QAction(text, self)
+        # Some standard keys have no binding on some platforms (e.g. Save As on Windows).
+        keys: list[QKeySequence] = []
+        for shortcut in shortcuts:
+            key = QKeySequence(shortcut)
+            if not key.isEmpty() and key not in keys:
+                keys.append(key)
+        action.setShortcuts(keys)
+        if keys:
+            hint = keys[0].toString(QKeySequence.SequenceFormat.NativeText)
+            tip = f"{tip} ({hint})"
+        action.setToolTip(tip)
+        action.setStatusTip(tip)
+        action.triggered.connect(slot)
+        return action
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Main")
@@ -69,45 +97,64 @@ class MainWindow(QMainWindow):
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(toolbar)
 
-        new_action = QAction("New", self)
-        new_action.setShortcut(QKeySequence.StandardKey.New)
-        new_action.triggered.connect(self.reset_circuit)
-        open_action = QAction("Open", self)
-        open_action.setShortcut(QKeySequence.StandardKey.Open)
-        open_action.triggered.connect(self.open_file)
-        save_action = QAction("Save", self)
-        save_action.setShortcut(QKeySequence.StandardKey.Save)
-        save_action.triggered.connect(self.save_file)
-        undo_action = QAction("Undo", self)
-        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        undo_action.triggered.connect(self.undo)
-        redo_action = QAction("Redo", self)
-        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
-        redo_action.triggered.connect(self.redo)
-        self.rotate_action = QAction("Rotate", self)
-        self.rotate_action.setShortcut(QKeySequence("R"))
-        self.rotate_action.triggered.connect(self.scene.rotate_selected)
-        self.delete_action = QAction("Delete", self)
-        self.delete_action.setShortcuts(
-            [QKeySequence(Qt.Key.Key_Delete), QKeySequence(Qt.Key.Key_Backspace)]
+        standard = QKeySequence.StandardKey
+        self.new_action = self._action(
+            "New", self.reset_circuit, "Start a new circuit", [standard.New]
         )
-        self.delete_action.triggered.connect(self._delete_selected)
-        image_action = QAction("Export PNG", self)
-        image_action.triggered.connect(self.export_png)
-        data_action = QAction("Export CSV", self)
-        data_action.triggered.connect(self.export_csv)
-        for action in (
-            new_action,
-            open_action,
-            save_action,
-            undo_action,
-            redo_action,
-            self.rotate_action,
-            self.delete_action,
-            image_action,
-            data_action,
-        ):
-            toolbar.addAction(action)
+        self.open_action = self._action(
+            "Open", self.open_file, "Open a saved circuit", [standard.Open]
+        )
+        self.save_action = self._action("Save", self.save_file, "Save the circuit", [standard.Save])
+        self.save_as_action = self._action(
+            "Save As",
+            self.save_file_as,
+            "Save the circuit to a new file",
+            [standard.SaveAs, "Ctrl+Shift+S"],
+        )
+        self.undo_action = self._action("Undo", self.undo, "Undo the last edit", [standard.Undo])
+        self.redo_action = self._action(
+            "Redo", self.redo, "Redo the last undone edit", [standard.Redo]
+        )
+        self.rotate_action = self._action(
+            "Rotate", self.scene.rotate_selected, "Rotate the selected component 90°", ["R"]
+        )
+        self.delete_action = self._action(
+            "Delete",
+            self._delete_selected,
+            "Delete the selected components, wires, junctions, or bends",
+            [QKeySequence(Qt.Key.Key_Delete), QKeySequence(Qt.Key.Key_Backspace)],
+        )
+        self.fit_action = self._action(
+            "Fit view", self.view.fit_circuit, "Show the whole circuit", ["Ctrl+0"]
+        )
+        self.zoom_in_action = self._action(
+            "Zoom in", self.view.zoom_in, "Zoom in", [standard.ZoomIn, "Ctrl+="]
+        )
+        self.zoom_out_action = self._action(
+            "Zoom out", self.view.zoom_out, "Zoom out", [standard.ZoomOut]
+        )
+        self.export_png_action = self._action(
+            "Export PNG", self.export_png, "Save a picture of the circuit"
+        )
+        self.export_csv_action = self._action(
+            "Export CSV",
+            self.export_csv,
+            "Save the selected component's time-series data as a spreadsheet",
+        )
+        groups: tuple[tuple[QAction, ...], ...] = (
+            (self.new_action, self.open_action, self.save_action, self.save_as_action),
+            (self.undo_action, self.redo_action),
+            (self.rotate_action, self.delete_action),
+            (self.fit_action,),
+            (self.export_png_action, self.export_csv_action),
+        )
+        for index, group in enumerate(groups):
+            if index:
+                toolbar.addSeparator()
+            for action in group:
+                toolbar.addAction(action)
+        # Zoom shortcuts work anywhere in the window without crowding the toolbar.
+        self.addActions([self.zoom_in_action, self.zoom_out_action])
         toolbar.addSeparator()
         brand = QLabel("  ⚡ CircuitCanvas")
         brand.setStyleSheet("font-size:16px;font-weight:700;color:#dbeafe;background:transparent")
@@ -190,10 +237,13 @@ class MainWindow(QMainWindow):
         self.scene.circuit_changed.connect(self._circuit_changed)
         self.scene.selection_changed.connect(self._selection_changed)
         self.inspector.value_changed.connect(self._update_value)
+        self.inspector.value_adjusted.connect(self._adjust_value)
         self.inspector.delete_requested.connect(self._delete_component)
+        self.inspector.rotate_requested.connect(self.scene.rotate_component)
         self.inspector.parallel_requested.connect(self._duplicate_parallel)
         self.analysis.time_index_changed.connect(self._time_index_changed)
         self.source_voltage.valueChanged.connect(self._source_changed)
+        self.source_voltage.editingFinished.connect(self._end_source_edit)
         self.controller.result_ready.connect(self._apply_result)
         self.controller.diagnostics_ready.connect(self._apply_diagnostics)
         self.equations.equation_selected.connect(self.scene.highlight_equation)
@@ -211,11 +261,13 @@ class MainWindow(QMainWindow):
 
     def _circuit_changed(self, revision: int) -> None:
         self.circuit = self.scene.circuit
+        self._update_title()
         self.controller.request(revision, self.circuit.snapshot())
 
     def _selection_changed(self, component_id: str) -> None:
         component = self.circuit.components.get(component_id)
         if component is None:
+            self.inspector.clear_component()
             return
         self.inspector.set_component(component)
         if self.current_result is not None and component_id in self.current_result.branches:
@@ -231,6 +283,14 @@ class MainWindow(QMainWindow):
         self.scene.rebuild()
         self._circuit_changed(self.circuit.revision)
 
+    def _adjust_value(self, component_id: str, value: float, session: int) -> None:
+        """Apply a slider move; one continuous drag becomes one undo step."""
+        self.scene.command_stack.update_value(
+            component_id, value, merge_key=("value", component_id, session)
+        )
+        self.scene.rebuild()
+        self._circuit_changed(self.circuit.revision)
+
     def _delete_component(self, component_id: str) -> None:
         self.scene.command_stack.delete(component_id)
         self.inspector.clear_component()
@@ -239,9 +299,9 @@ class MainWindow(QMainWindow):
         self._circuit_changed(self.circuit.revision)
 
     def _delete_selected(self) -> None:
-        component_id = self.scene.selected_component_id()
-        if component_id is not None:
-            self._delete_component(component_id)
+        before = set(self.circuit.components)
+        if self.scene.delete_selected() and not before <= set(self.circuit.components):
+            self.analysis.clear()
 
     def _duplicate_parallel(self, component_id: str) -> None:
         if self.circuit.wires:
@@ -251,10 +311,21 @@ class MainWindow(QMainWindow):
         self.scene.insert_component_for_test(component.kind, parallel_to=component_id)
 
     def _source_changed(self, voltage: float) -> None:
-        self.circuit.source = replace(self.circuit.source, voltage=voltage)
-        self.circuit.revision += 1
+        # Typing "17" fires 1 then 17; arrow clicks fire repeatedly. Merge them
+        # into one undo step until the field finishes editing.
+        self.scene.command_stack.set_source_voltage(
+            voltage, merge_key=("source", self._source_edit_session)
+        )
         self.scene.rebuild()
         self._circuit_changed(self.circuit.revision)
+
+    def _end_source_edit(self) -> None:
+        self._source_edit_session += 1
+
+    def _sync_source_control(self) -> None:
+        self.source_voltage.blockSignals(True)
+        self.source_voltage.setValue(self.circuit.source.voltage)
+        self.source_voltage.blockSignals(False)
 
     def _apply_result(self, revision: int, result: SimulationResult) -> None:
         if revision != self.circuit.revision:
@@ -275,10 +346,10 @@ class MainWindow(QMainWindow):
         power = abs(float(result.source_power[-1]))
         energy = float(result.metrics["stored_energy_j"])
         self.summary_label.setText(
-            f"Source: {self.circuit.source.voltage:g} V DC\n"
-            f"Total current: {current:.5g} A\n"
-            f"Total power: {power:.5g} W\n"
-            f"Stored energy: {energy:.5g} J\n"
+            f"Source: {format_si(self.circuit.source.voltage, 'V')} DC\n"
+            f"Total current: {format_si(current, 'A')}\n"
+            f"Total power: {format_si(power, 'W')}\n"
+            f"Stored energy: {format_si(energy, 'J')}\n"
             f"Components: {len(self.circuit.components)}"
         )
         self.status_label.setText("✓ Circuit valid · transient solution converged")
@@ -315,15 +386,71 @@ class MainWindow(QMainWindow):
 
     def undo(self) -> None:
         if self.scene.command_stack.undo():
+            self._end_source_edit()
+            self._sync_source_control()
             self.scene.rebuild()
             self._circuit_changed(self.circuit.revision)
 
     def redo(self) -> None:
         if self.scene.command_stack.redo():
+            self._end_source_edit()
+            self._sync_source_control()
             self.scene.rebuild()
             self._circuit_changed(self.circuit.revision)
 
+    # ----- Documents: new, open, save, close -------------------------------------
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        return not self.scene.command_stack.is_clean
+
+    def _update_title(self) -> None:
+        name = self._current_path.name if self._current_path is not None else "Untitled"
+        self.setWindowTitle(f"{name}[*] — CircuitCanvas")
+        self.setWindowModified(self.has_unsaved_changes)
+
+    def _ask_save_changes(self) -> QMessageBox.StandardButton:
+        """Ask whether to keep unsaved edits. Tests replace this to avoid a modal dialog."""
+        name = self._current_path.name if self._current_path is not None else "this circuit"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Unsaved changes")
+        box.setText(f"Do you want to save the changes to {name}?")
+        box.setInformativeText("Your changes will be lost if you don't save them.")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        return QMessageBox.StandardButton(box.exec())
+
+    def _confirm_discard_changes(self) -> bool:
+        """Return True when it is safe to replace or close the current circuit."""
+        if not self.has_unsaved_changes:
+            return True
+        answer = self._ask_save_changes()
+        if answer == QMessageBox.StandardButton.Save:
+            return self.save_file()
+        return answer == QMessageBox.StandardButton.Discard
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._confirm_discard_changes():
+            self.playback.set_playing(False)
+            event.accept()
+        else:
+            event.ignore()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._initial_fit_done:
+            self._initial_fit_done = True
+            # Wait for the splitters to settle so the fit uses the final canvas size.
+            QTimer.singleShot(0, self.view, self.view.fit_circuit)
+
     def reset_circuit(self) -> None:
+        if not self._confirm_discard_changes():
+            return
         self._current_path = None
         self._replace_circuit(Circuit.starter_loop(self.source_voltage.value()))
 
@@ -334,43 +461,81 @@ class MainWindow(QMainWindow):
         self.inspector.clear_component()
         self.analysis.clear()
         self.equations.clear()
-        self.source_voltage.blockSignals(True)
-        self.source_voltage.setValue(circuit.source.voltage)
-        self.source_voltage.blockSignals(False)
+        self._end_source_edit()
+        self._sync_source_control()
+        self.view.fit_circuit()
+        self._update_title()
         self.controller.request(circuit.revision, circuit.snapshot())
 
-    def save_file(self) -> None:
-        path = self._current_path
-        if path is None:
-            filename, _ = QFileDialog.getSaveFileName(
-                self, "Save circuit", "circuit.circuitcanvas", "CircuitCanvas (*.circuitcanvas)"
+    def save_file(self) -> bool:
+        """Save to the current file, asking for a name the first time. Returns success."""
+        if self._current_path is None:
+            return self.save_file_as()
+        return self._write_circuit(self._current_path)
+
+    def save_file_as(self) -> bool:
+        suggested = (
+            str(self._current_path.with_suffix(".circuitcanvas"))
+            if self._current_path is not None
+            else "circuit.circuitcanvas"
+        )
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save circuit", suggested, "CircuitCanvas (*.circuitcanvas)"
+        )
+        if not filename:
+            return False
+        path = Path(filename)
+        if not path.suffix:
+            path = path.with_suffix(".circuitcanvas")
+        return self._write_circuit(path)
+
+    def _write_circuit(self, path: Path) -> bool:
+        try:
+            save_circuit(path, self.circuit)
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Could not save circuit", f"CircuitCanvas could not write {path}:\n{exc}"
             )
-            if not filename:
-                return
-            path = Path(filename)
-        save_circuit(path, self.circuit)
+            return False
         self._current_path = path
+        self.scene.command_stack.mark_clean()
+        self._update_title()
+        self.statusBar().showMessage(f"Saved {path.name}", 4000)
+        return True
 
     def open_file(self) -> None:
+        if not self._confirm_discard_changes():
+            return
         filename, _ = QFileDialog.getOpenFileName(
             self, "Open circuit", "", "CircuitCanvas (*.circuitcanvas *.json)"
         )
-        if not filename:
-            return
+        if filename:
+            self.open_path(Path(filename))
+
+    def open_path(self, path: Path) -> bool:
         try:
-            circuit = load_circuit(filename)
+            circuit = load_circuit(path)
         except CircuitFileError as exc:
             QMessageBox.warning(self, "Could not open circuit", str(exc))
-            return
-        self._current_path = Path(filename)
+            return False
+        self._current_path = path
         self._replace_circuit(circuit)
+        return True
+
+    # ----- Exports ----------------------------------------------------------------
 
     def export_png(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
             self, "Export circuit image", "circuit.png", "PNG image (*.png)"
         )
-        if filename:
+        if not filename:
+            return
+        try:
             export_scene_png(filename, self.scene)
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not export image", str(exc))
+            return
+        self.statusBar().showMessage(f"Exported {Path(filename).name}", 4000)
 
     def export_csv(self) -> None:
         selected = self.scene.selected_component_id()
@@ -384,5 +549,11 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(
             self, "Export transient data", f"{selected}.csv", "CSV data (*.csv)"
         )
-        if filename:
+        if not filename:
+            return
+        try:
             export_branch_csv(filename, self.current_result, selected)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not export data", str(exc))
+            return
+        self.statusBar().showMessage(f"Exported {Path(filename).name}", 4000)
