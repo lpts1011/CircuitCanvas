@@ -464,3 +464,14 @@ def test_readme_quick_start_edits_the_double_clicked_resistor(qtbot) -> None:
 
     assert window.circuit.components[resistor].value == pytest.approx(10e3)
     assert window.circuit.components[capacitor].value == pytest.approx(47e-6)
+
+
+def test_window_opens_no_larger_than_the_screen(qtbot) -> None:
+    from circuitcanvas.ui.main_window import MainWindow
+
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    available = window.screen().availableGeometry()
+
+    assert window.width() <= max(window.minimumWidth(), available.width())
+    assert window.height() <= max(window.minimumHeight(), available.height())

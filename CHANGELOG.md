@@ -38,6 +38,7 @@ simulation settings, protects your work, and ships as a downloadable app.
 - When the circuit cannot be solved, a plain-language message appears above it, the component
   causing it is outlined in red, and stale numbers and graphs are hidden.
 - Right-click menus on components, wires, junctions, bends, the battery, and empty canvas.
+- Dropping a component near a wire inserts it there (the target wire glows while you drag), and dragging a loose component onto a wire connects it.
 - Kirchhoff's laws have readable names (Junction 1, Loop 1, R1: Ohm's law).
 - Icons in the toolbar, symbols on the component buttons, a light theme, the system font, and
   upright labels on rotated components.
@@ -59,6 +60,8 @@ simulation settings, protects your work, and ships as a downloadable app.
   edit the wrong component and Delete removed both.
 - The Inspector kept showing a component after it was deselected.
 - On startup the battery was outside the visible canvas.
+- Clicking a component marked the circuit as changed and added an undo step.
+- The window could open larger than a small screen.
 - Saving or exporting to a location that cannot be written crashed instead of showing a message.
 
 ## 0.3.1

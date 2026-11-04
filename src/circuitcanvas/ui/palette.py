@@ -49,6 +49,8 @@ class DraggableComponentButton(QToolButton):
         drag = QDrag(self)
         drag.setMimeData(mime)
         drag.setPixmap(self.icon().pixmap(QSize(56, 24)))
+        # Hold the symbol by its middle, so lining it up with a wire drops it there.
+        drag.setHotSpot(QPoint(28, 12))
         drag.exec(Qt.DropAction.CopyAction)
         self.setDown(False)
 

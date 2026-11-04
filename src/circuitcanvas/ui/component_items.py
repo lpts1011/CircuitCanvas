@@ -193,6 +193,7 @@ class ComponentItem(QGraphicsObject):
         self.setFlags(
             QGraphicsObject.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsObject.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsObject.GraphicsItemFlag.ItemSendsGeometryChanges
         )
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setToolTip(
@@ -211,6 +212,10 @@ class ComponentItem(QGraphicsObject):
     def itemChange(self, change: QGraphicsObject.GraphicsItemChange, value: object) -> object:
         if change == QGraphicsObject.GraphicsItemChange.ItemRotationChange:
             self.prepareGeometryChange()
+        elif change == QGraphicsObject.GraphicsItemChange.ItemPositionHasChanged:
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "component_dragging"):
+                scene.component_dragging(self)
         return super().itemChange(change, value)
 
     def set_highlighted(self, highlighted: bool) -> None:

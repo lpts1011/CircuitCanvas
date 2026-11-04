@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
+from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -53,8 +53,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self, *, debounce_ms: int = 150) -> None:
         super().__init__()
-        self.resize(1440, 900)
-        self.setMinimumSize(1100, 680)
+        self.setMinimumSize(1000, 640)
+        self._fit_to_screen(1440, 900)
         self.circuit = Circuit.starter_loop(12.0)
         self.current_result: SimulationResult | None = None
         self.current_time_index = 0
@@ -88,6 +88,20 @@ class MainWindow(QMainWindow):
         self.details.set_status("info", "Working out the circuit…")
         self.details.clear_readings(0)
         self.controller.request(self.circuit.revision, self.circuit.snapshot())
+
+    def _fit_to_screen(self, width: int, height: int) -> None:
+        """Open at the preferred size, but never larger than the screen's free area."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            self.resize(width, height)
+            return
+        available = screen.availableGeometry()
+        size = QSize(min(width, available.width() - 24), min(height, available.height() - 24))
+        self.resize(size)
+        self.move(
+            available.x() + (available.width() - self.width()) // 2,
+            available.y() + (available.height() - self.height()) // 2,
+        )
 
     # ----- Actions, toolbar, menus ------------------------------------------------------
 

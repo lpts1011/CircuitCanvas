@@ -384,29 +384,61 @@ class CircuitCommandStack:
                     value,
                 )
             )
-            self.circuit.positions[component_id] = position
-            self.circuit.rotations[component_id] = rotation % 360
-            del self.circuit.wires[wire_id]
-            start_wire_id = self.circuit.next_wire_id()
-            end_wire_id = self.circuit.next_wire_id()
-            self.circuit.wires[start_wire_id] = Wire(
-                start_wire_id,
-                original.start,
-                TerminalRef(component_id, "a"),
-                start_route,
-            )
-            self.circuit.wires[end_wire_id] = Wire(
-                end_wire_id,
-                TerminalRef(component_id, "b"),
-                original.end,
-                end_route,
-            )
-            self.circuit.touch()
+            self._replace_wire(component_id, original, position, rotation, start_route, end_route)
             return component_id
 
         result = self._execute(operation)
         assert isinstance(result, str)
         return result
+
+    def splice_component_into_wire(
+        self,
+        component_id: str,
+        wire_id: str,
+        position: Point,
+        rotation: int,
+        start_route: tuple[Point, ...] = (),
+        end_route: tuple[Point, ...] = (),
+    ) -> None:
+        """Put an unconnected component into a wire, as if it had been dropped there."""
+
+        def operation() -> None:
+            if component_id not in self.circuit.components:
+                raise KeyError(component_id)
+            terminals = {TerminalRef(component_id, "a"), TerminalRef(component_id, "b")}
+            if any(
+                endpoint in terminals
+                for wire in self.circuit.wires.values()
+                for endpoint in (wire.start, wire.end)
+            ):
+                raise ValueError(f"{component_id} is already wired")
+            original = self.circuit.wires[wire_id]
+            self._replace_wire(component_id, original, position, rotation, start_route, end_route)
+
+        self._execute(operation)
+
+    def _replace_wire(
+        self,
+        component_id: str,
+        original: Wire,
+        position: Point,
+        rotation: int,
+        start_route: tuple[Point, ...],
+        end_route: tuple[Point, ...],
+    ) -> None:
+        """Swap one wire for wire → component → wire, keeping both original ends."""
+        self.circuit.positions[component_id] = position
+        self.circuit.rotations[component_id] = rotation % 360
+        del self.circuit.wires[original.id]
+        start_wire_id = self.circuit.next_wire_id()
+        end_wire_id = self.circuit.next_wire_id()
+        self.circuit.wires[start_wire_id] = Wire(
+            start_wire_id, original.start, TerminalRef(component_id, "a"), start_route
+        )
+        self.circuit.wires[end_wire_id] = Wire(
+            end_wire_id, TerminalRef(component_id, "b"), original.end, end_route
+        )
+        self.circuit.touch()
 
     def add_parallel_wired(
         self,

@@ -270,3 +270,16 @@ def test_simulation_settings_are_part_of_undo_history() -> None:
 
     assert stack.undo()
     assert circuit.settings == original
+
+
+def test_splicing_requires_an_unwired_component() -> None:
+    circuit = Circuit.starter_loop()
+    stack = CircuitCommandStack(circuit)
+    loose = stack.add_loose_component(ComponentKind.RESISTOR, 100.0, (500.0, 600.0))
+
+    stack.splice_component_into_wire(loose, "W2", (980.0, 360.0), 90)
+
+    assert "W2" not in circuit.wires
+    assert circuit.rotations[loose] == 90
+    with pytest.raises(ValueError, match="already wired"):
+        stack.splice_component_into_wire(loose, "W1", (500.0, 290.0), 0)
