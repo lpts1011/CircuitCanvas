@@ -79,6 +79,7 @@ def circuit_to_dict(circuit: Circuit) -> dict[str, Any]:
             "duration": circuit.settings.duration,
             "samples": circuit.settings.samples,
             "method": circuit.settings.method,
+            "auto_duration": circuit.settings.auto_duration,
         },
         "open_edge": circuit.open_edge,
     }
@@ -107,6 +108,8 @@ def circuit_from_dict(payload: Mapping[str, Any]) -> Circuit:
                 duration=float(settings_data["duration"]),
                 samples=int(settings_data["samples"]),
                 method=str(settings_data["method"]),
+                # Files written before automatic spans existed keep their fixed span.
+                auto_duration=bool(settings_data.get("auto_duration", False)),
             ),
             open_edge=(str(payload["open_edge"]) if payload.get("open_edge") else None),
         )

@@ -1,5 +1,6 @@
 hiddenimports = []
-datas = [("examples", "examples")]
+# Example circuits live inside the package and are read with importlib.resources.
+datas = [("src/circuitcanvas/examples/*.json", "circuitcanvas/examples")]
 
 a = Analysis(
     ["run_circuitcanvas.py"],

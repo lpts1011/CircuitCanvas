@@ -63,6 +63,22 @@ The left-hand matrix remains constant for a linear circuit and fixed time step, 
 
 To keep every displayed residual faithful to the discrete solve, ordinary equations for the trapezoidal method use algebraic voltages and currents at the interval midpoint and reactive derivatives across that interval. Backward Euler uses the right endpoint. The initial sample represents the unenergized state immediately before the source step. With these conventions, KCL, KVL, element-law, and animated wire-flow residuals all test the same numerical equation.
 
+## Automatic time span
+
+With **Auto** enabled, the span is chosen from the circuit's natural frequencies, the
+finite generalized eigenvalues λ of
+
+\[
+G v = -\lambda C v .
+\]
+
+Each mode decays like \(e^{\operatorname{Re}(\lambda) t}\), so the slowest time constant is
+\(\tau = 1 / \min |\operatorname{Re}\lambda|\). The simulated span is \(5\tau\), after which
+less than 1 % of the step response remains, rounded up to 1, 2, 2.5, or 5 × 10ⁿ seconds.
+Lossless oscillations (purely imaginary λ) never settle, so the span then covers five periods
+\(2\pi / |\operatorname{Im}\lambda|\). A purely resistive circuit has no finite λ and keeps the
+configured span.
+
 ## Reported quantities
 
 Voltage is defined from each component's `node_a` to `node_b`. Current follows the same passive reference direction.

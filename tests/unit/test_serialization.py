@@ -99,3 +99,17 @@ def test_schema_one_migration_preserves_parallel_topology() -> None:
     assert components["R1"].endpoints == components["R2"].endpoints
     assert snapshot.source.endpoints == components["R1"].endpoints
     assert circuit_to_dict(restored)["schema_version"] == 2
+
+
+def test_auto_time_span_round_trips_and_defaults_off_for_old_files(tmp_path) -> None:
+    from circuitcanvas.domain.serialization import circuit_to_dict
+
+    circuit = Circuit.new(9.0)
+    assert circuit.settings.auto_duration
+    path = tmp_path / "auto.circuitcanvas"
+    save_circuit(path, circuit)
+    assert load_circuit(path).settings.auto_duration
+
+    payload = circuit_to_dict(circuit)
+    del payload["settings"]["auto_duration"]
+    assert not circuit_from_dict(payload).settings.auto_duration

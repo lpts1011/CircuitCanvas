@@ -50,7 +50,7 @@ This separation makes the rules unambiguous:
 - multiple branches may share either terminal, so arbitrary series/parallel combinations are natural; and
 - solver connectivity never depends on pixel distance.
 
-All topology and layout edits are stored by `CircuitCommandStack`, so undo/redo restores components, rotations, junctions, routes, and counters together.
+All topology, layout, battery-voltage, and simulation-setting edits are stored by `CircuitCommandStack`, so undo/redo restores components, rotations, junctions, routes, the source, settings, and counters together. Consecutive edits that share a merge key, such as every tick of one slider drag, collapse into a single history entry.
 
 ## Kirchhoff presentation layer
 
@@ -77,6 +77,6 @@ Arrays become read-only when the result is created. Presentation widgets therefo
 
 ## Persistence
 
-Schema version 2 stores source, components, positions, rotations, terminal/junction endpoints, wire routes, and simulation settings. Schema-1 series/parallel files are migrated by synthesizing explicit junction wiring. Computed arrays are not saved because they can be reproduced from the authoritative circuit.
+Schema version 2 stores source, components, positions, rotations, terminal/junction endpoints, wire routes, and simulation settings, including `auto_duration`; files written before that field existed load with it off, so their saved span is kept. Schema-1 series/parallel files are migrated by synthesizing explicit junction wiring. Computed arrays are not saved because they can be reproduced from the authoritative circuit.
 
 Unsupported schema versions and malformed files raise `CircuitFileError` with an actionable message. Stable component IDs and layout coordinates survive a round trip.

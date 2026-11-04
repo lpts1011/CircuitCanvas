@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -24,7 +26,8 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.serialization import CircuitFileError, load_circuit, save_circuit
-from circuitcanvas.solver.equations import build_equation_report
+from circuitcanvas.examples import EXAMPLES, Example, load_example
+from circuitcanvas.solver.equations import EquationLine, build_equation_report
 from circuitcanvas.solver.results import SimulationResult
 from circuitcanvas.solver.validation import Diagnostic
 from circuitcanvas.solver.wire_flow import reconstruct_wire_flows
@@ -32,8 +35,9 @@ from circuitcanvas.solver.wire_flow import reconstruct_wire_flows
 from .analysis_panel import AnalysisPanel
 from .circuit_scene import CircuitScene, CircuitView
 from .equation_panel import EquationPanel
-from .export import export_branch_csv, export_scene_png
+from .export import export_all_branches_csv, export_branch_csv, export_scene_png
 from .formatting import format_si
+from .help import ABOUT_HTML, QUICK_START_HTML, HelpDialog, shortcuts_html
 from .inspector import ComponentInspector
 from .palette import ComponentPalette
 from .playback import PlaybackController
@@ -49,6 +53,8 @@ class MainWindow(QMainWindow):
         self.current_time_index = 0
         self._current_path: Path | None = None
         self._source_edit_session = 0
+        self._untitled_name = "Untitled"
+        self._help_dialog: HelpDialog | None = None
         self._initial_fit_done = False
 
         self.scene = CircuitScene(self.circuit)
@@ -61,6 +67,7 @@ class MainWindow(QMainWindow):
         self.playback = PlaybackController(self)
 
         self._build_toolbar()
+        self._build_menus()
         self._build_layout()
         self._connect_signals()
         # Shows toolbar hints on hover and confirmations such as "Saved …".
@@ -74,8 +81,13 @@ class MainWindow(QMainWindow):
         slot: Callable[[], object],
         tip: str,
         shortcuts: Sequence[QKeySequence | QKeySequence.StandardKey | str] = (),
+        *,
+        button_text: str | None = None,
     ) -> QAction:
+        """Create an action; ``text`` is the menu label, ``button_text`` the toolbar label."""
         action = QAction(text, self)
+        if button_text is not None:
+            action.setIconText(button_text)
         # Some standard keys have no binding on some platforms (e.g. Save As on Windows).
         keys: list[QKeySequence] = []
         for shortcut in shortcuts:
@@ -102,14 +114,15 @@ class MainWindow(QMainWindow):
             "New", self.reset_circuit, "Start a new circuit", [standard.New]
         )
         self.open_action = self._action(
-            "Open", self.open_file, "Open a saved circuit", [standard.Open]
+            "Open…", self.open_file, "Open a saved circuit", [standard.Open], button_text="Open"
         )
         self.save_action = self._action("Save", self.save_file, "Save the circuit", [standard.Save])
         self.save_as_action = self._action(
-            "Save As",
+            "Save As…",
             self.save_file_as,
             "Save the circuit to a new file",
             [standard.SaveAs, "Ctrl+Shift+S"],
+            button_text="Save As",
         )
         self.undo_action = self._action("Undo", self.undo, "Undo the last edit", [standard.Undo])
         self.redo_action = self._action(
@@ -134,13 +147,35 @@ class MainWindow(QMainWindow):
             "Zoom out", self.view.zoom_out, "Zoom out", [standard.ZoomOut]
         )
         self.export_png_action = self._action(
-            "Export PNG", self.export_png, "Save a picture of the circuit"
+            "Export Picture (PNG)…",
+            self.export_png,
+            "Save a picture of the circuit",
+            button_text="Export PNG",
         )
         self.export_csv_action = self._action(
-            "Export CSV",
+            "Export Data (CSV)…",
             self.export_csv,
-            "Save the selected component's time-series data as a spreadsheet",
+            "Save the time-series data as a spreadsheet: the selected component, "
+            "or every component when nothing is selected",
+            button_text="Export CSV",
         )
+        self.quit_action = self._action(
+            "Quit CircuitCanvas", self.close, "Quit CircuitCanvas", [standard.Quit]
+        )
+        self.quit_action.setMenuRole(QAction.MenuRole.QuitRole)
+        self.quick_start_action = self._action(
+            "Quick Start Guide",
+            self.show_quick_start,
+            "How to build and read a circuit",
+            [standard.HelpContents, "F1"],
+        )
+        self.shortcuts_action = self._action(
+            "Keyboard Shortcuts", self.show_shortcuts, "Every shortcut and mouse gesture"
+        )
+        self.about_action = self._action(
+            "About CircuitCanvas", self.show_about, "Version and license"
+        )
+        self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
         groups: tuple[tuple[QAction, ...], ...] = (
             (self.new_action, self.open_action, self.save_action, self.save_as_action),
             (self.undo_action, self.redo_action),
@@ -159,6 +194,73 @@ class MainWindow(QMainWindow):
         brand = QLabel("  ⚡ CircuitCanvas")
         brand.setStyleSheet("font-size:16px;font-weight:700;color:#dbeafe;background:transparent")
         toolbar.addWidget(brand)
+
+    def _build_menus(self) -> None:
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("&File")
+        file_menu.addActions([self.new_action, self.open_action])
+        self.examples_menu = file_menu.addMenu("Open Example")
+        for example in EXAMPLES:
+            action = self.examples_menu.addAction(example.title)
+            action.setToolTip(example.description)
+            action.setStatusTip(example.description)
+            action.triggered.connect(
+                lambda checked=False, chosen=example: self.open_example(chosen)
+            )
+        self.examples_menu.setToolTipsVisible(True)
+        file_menu.addSeparator()
+        file_menu.addActions([self.save_action, self.save_as_action])
+        file_menu.addSeparator()
+        file_menu.addActions([self.export_png_action, self.export_csv_action])
+        file_menu.addSeparator()
+        file_menu.addAction(self.quit_action)
+
+        edit_menu = menu_bar.addMenu("&Edit")
+        edit_menu.addActions([self.undo_action, self.redo_action])
+        edit_menu.addSeparator()
+        edit_menu.addActions([self.rotate_action, self.delete_action])
+
+        view_menu = menu_bar.addMenu("&View")
+        view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.fit_action])
+
+        help_menu = menu_bar.addMenu("&Help")
+        help_menu.addActions([self.quick_start_action, self.shortcuts_action])
+        help_menu.addSeparator()
+        help_menu.addAction(self.about_action)
+
+    def _all_actions(self) -> list[QAction]:
+        return [
+            self.new_action,
+            self.open_action,
+            self.save_action,
+            self.save_as_action,
+            self.undo_action,
+            self.redo_action,
+            self.rotate_action,
+            self.delete_action,
+            self.zoom_in_action,
+            self.zoom_out_action,
+            self.fit_action,
+            self.quick_start_action,
+            self.quit_action,
+        ]
+
+    def _show_help(self, title: str, html: str) -> HelpDialog:
+        if self._help_dialog is not None:
+            self._help_dialog.close()
+        self._help_dialog = HelpDialog(title, html, self)
+        self._help_dialog.show()
+        return self._help_dialog
+
+    def show_quick_start(self) -> HelpDialog:
+        return self._show_help("Quick Start Guide", QUICK_START_HTML)
+
+    def show_shortcuts(self) -> HelpDialog:
+        return self._show_help("Keyboard Shortcuts", shortcuts_html(self._all_actions()))
+
+    def show_about(self) -> HelpDialog:
+        return self._show_help("About CircuitCanvas", ABOUT_HTML)
 
     def _build_layout(self) -> None:
         root = QWidget()
@@ -180,8 +282,8 @@ class MainWindow(QMainWindow):
         sidebar.setMinimumWidth(320)
         sidebar.setMaximumWidth(390)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(20, 20, 20, 20)
-        side.setSpacing(18)
+        side.setContentsMargins(20, 16, 20, 16)
+        side.setSpacing(14)
 
         source_heading = QLabel("DC SOURCE")
         source_heading.setStyleSheet(
@@ -195,13 +297,22 @@ class MainWindow(QMainWindow):
         self.source_voltage.setDecimals(3)
         self.source_voltage.setValue(12.0)
         self.source_voltage.setSuffix(" V")
+        self.source_voltage.setToolTip(
+            "Voltage of the ideal DC battery. It is switched on at t = 0.\n"
+            "Tip: double-click the battery on the canvas to edit this."
+        )
         source_row.addWidget(self.source_voltage)
         side.addLayout(source_row)
+        # The palette stays visible so components can be added while editing one.
+        side.addWidget(self.component_palette)
         self.sidebar_tabs = QTabWidget()
-        self.sidebar_tabs.addTab(self.component_palette, "Components")
         self.sidebar_tabs.addTab(self.inspector, "Inspector")
         self.sidebar_tabs.addTab(self.equations, "Equations")
-        self.sidebar_tabs.setMinimumHeight(460)
+        self.sidebar_tabs.setTabToolTip(0, "Edit the selected component")
+        self.sidebar_tabs.setTabToolTip(
+            1, "Kirchhoff's laws for this circuit, with the solved numbers filled in"
+        )
+        self.sidebar_tabs.setMinimumHeight(300)
         side.addWidget(self.sidebar_tabs, 1)
         side.addWidget(self._separator())
         summary_heading = QLabel("CIRCUIT SUMMARY")
@@ -236,6 +347,8 @@ class MainWindow(QMainWindow):
         self.component_palette.component_clicked.connect(self.add_component)
         self.scene.circuit_changed.connect(self._circuit_changed)
         self.scene.selection_changed.connect(self._selection_changed)
+        self.scene.component_activated.connect(self.edit_component)
+        self.scene.source_activated.connect(self._edit_source_voltage)
         self.inspector.value_changed.connect(self._update_value)
         self.inspector.value_adjusted.connect(self._adjust_value)
         self.inspector.delete_requested.connect(self._delete_component)
@@ -246,9 +359,12 @@ class MainWindow(QMainWindow):
         self.source_voltage.editingFinished.connect(self._end_source_edit)
         self.controller.result_ready.connect(self._apply_result)
         self.controller.diagnostics_ready.connect(self._apply_diagnostics)
-        self.equations.equation_selected.connect(self.scene.highlight_equation)
+        self.equations.equation_selected.connect(self._equation_selected)
+        self.sidebar_tabs.currentChanged.connect(self._sidebar_tab_changed)
         self.analysis.play_toggled.connect(self.playback.set_playing)
         self.analysis.speed_changed.connect(self.playback.set_speed)
+        self.analysis.auto_span_requested.connect(self._use_auto_span)
+        self.analysis.manual_span_requested.connect(self._use_manual_span)
         self.playback.playing_changed.connect(self.analysis.set_playing)
         self.playback.animation_tick.connect(self.scene.advance_arrows)
         self.playback.time_index_changed.connect(self.analysis.time_slider.setValue)
@@ -277,6 +393,31 @@ class MainWindow(QMainWindow):
                 self.current_result.branches[component_id],
             )
         self.equations.reveal_component(component_id)
+
+    def edit_component(self, component_id: str) -> None:
+        """Select a component and put the cursor in its value field."""
+        item = self.scene.component_items.get(component_id)
+        if item is None:
+            return
+        if not item.isSelected():
+            self.scene.clearSelection()
+            item.setSelected(True)
+        self.sidebar_tabs.setCurrentWidget(self.inspector)
+        self.inspector.focus_value()
+
+    def _edit_source_voltage(self) -> None:
+        self.source_voltage.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.source_voltage.selectAll()
+
+    def _equations_visible(self) -> bool:
+        return self.sidebar_tabs.currentWidget() is self.equations
+
+    def _equation_selected(self, line: EquationLine | None) -> None:
+        # Outline an equation's elements only while the user is reading equations.
+        self.scene.highlight_equation(line if self._equations_visible() else None)
+
+    def _sidebar_tab_changed(self, _index: int) -> None:
+        self._equation_selected(self.equations.current_line())
 
     def _update_value(self, component_id: str, value: float) -> None:
         self.scene.command_stack.update_value(component_id, value)
@@ -323,9 +464,30 @@ class MainWindow(QMainWindow):
         self._source_edit_session += 1
 
     def _sync_source_control(self) -> None:
+        """Show the circuit's battery voltage and time-span mode after undo, redo, or open."""
         self.source_voltage.blockSignals(True)
         self.source_voltage.setValue(self.circuit.source.voltage)
         self.source_voltage.blockSignals(False)
+        settings = self.circuit.settings
+        # In auto mode the real span arrives with the next result.
+        span = self.analysis.time_span if settings.auto_duration else settings.duration
+        self.analysis.show_time_span(span, auto=settings.auto_duration)
+
+    def _use_auto_span(self) -> None:
+        settings = self.circuit.settings
+        if settings.auto_duration:
+            return
+        self.scene.command_stack.set_simulation_settings(replace(settings, auto_duration=True))
+        self._circuit_changed(self.circuit.revision)
+
+    def _use_manual_span(self, seconds: float) -> None:
+        settings = self.circuit.settings
+        if not settings.auto_duration and math.isclose(settings.duration, seconds):
+            return
+        self.scene.command_stack.set_simulation_settings(
+            replace(settings, duration=seconds, auto_duration=False)
+        )
+        self._circuit_changed(self.circuit.revision)
 
     def _apply_result(self, revision: int, result: SimulationResult) -> None:
         if revision != self.circuit.revision:
@@ -334,6 +496,9 @@ class MainWindow(QMainWindow):
         index = len(result.time) - 1
         self.current_time_index = index
         self.playback.set_timeline(samples=len(result.time), duration=float(result.time[-1]))
+        self.analysis.show_time_span(
+            float(result.time[-1]), auto=self.circuit.settings.auto_duration
+        )
         self.scene.set_result(result, index)
         snapshot = self.circuit.snapshot()
         self.equations.set_report(build_equation_report(snapshot, result, index))
@@ -405,7 +570,7 @@ class MainWindow(QMainWindow):
         return not self.scene.command_stack.is_clean
 
     def _update_title(self) -> None:
-        name = self._current_path.name if self._current_path is not None else "Untitled"
+        name = self._current_path.name if self._current_path is not None else self._untitled_name
         self.setWindowTitle(f"{name}[*] — CircuitCanvas")
         self.setWindowModified(self.has_unsaved_changes)
 
@@ -452,6 +617,7 @@ class MainWindow(QMainWindow):
         if not self._confirm_discard_changes():
             return
         self._current_path = None
+        self._untitled_name = "Untitled"
         self._replace_circuit(Circuit.starter_loop(self.source_voltage.value()))
 
     def _replace_circuit(self, circuit: Circuit) -> None:
@@ -512,6 +678,21 @@ class MainWindow(QMainWindow):
         if filename:
             self.open_path(Path(filename))
 
+    def open_example(self, example: Example) -> bool:
+        """Open a bundled example as an untitled copy, so Save never overwrites it."""
+        if not self._confirm_discard_changes():
+            return False
+        try:
+            circuit = load_example(example)
+        except CircuitFileError as exc:
+            QMessageBox.warning(self, "Could not open example", str(exc))
+            return False
+        self._current_path = None
+        self._untitled_name = f"{example.title} (example)"
+        self._replace_circuit(circuit)
+        self.statusBar().showMessage(example.description, 8000)
+        return True
+
     def open_path(self, path: Path) -> bool:
         try:
             circuit = load_circuit(path)
@@ -538,21 +719,28 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Exported {Path(filename).name}", 4000)
 
     def export_csv(self) -> None:
-        selected = self.scene.selected_component_id()
-        if self.current_result is None or selected is None:
+        """Export the selected component's data, or every component when none is selected."""
+        result = self.current_result
+        if result is None:
             QMessageBox.information(
                 self,
-                "Select a component",
-                "Select a component with a valid simulation result before exporting data.",
+                "Nothing to export yet",
+                "The circuit has no result yet. Follow the message at the bottom right "
+                "to complete the circuit, then export again.",
             )
             return
+        selected = self.scene.selected_component_id()
+        default_name = f"{selected}.csv" if selected is not None else "circuit-data.csv"
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Export transient data", f"{selected}.csv", "CSV data (*.csv)"
+            self, "Export transient data", default_name, "CSV data (*.csv)"
         )
         if not filename:
             return
         try:
-            export_branch_csv(filename, self.current_result, selected)
+            if selected is not None:
+                export_branch_csv(filename, result, selected)
+            else:
+                export_all_branches_csv(filename, result)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Could not export data", str(exc))
             return

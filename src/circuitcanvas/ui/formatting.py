@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+import re
+from dataclasses import dataclass
+from decimal import Decimal
 
 _PREFIXES = (
     (1e9, "G"),
@@ -44,3 +47,68 @@ def format_si(value: float, unit: str, *, digits: int = 4, zero_below: float = 1
 
 def format_component_value(kind: str, value: float) -> str:
     return format_si(value, BASE_UNITS[kind], zero_below=0.0)
+
+
+# Decimal exponents, so "10u" is exactly 1e-05 rather than 9.999999999999999e-06.
+_INPUT_PREFIXES = {
+    "": 0,
+    "p": -12,
+    "n": -9,
+    "u": -6,
+    "μ": -6,
+    "m": -3,
+    "k": 3,
+    "K": 3,
+    "M": 6,
+    "meg": 6,
+    "Meg": 6,
+    "MEG": 6,
+    "G": 9,
+}
+# Longest first so "ohms" is stripped before "ohm".
+_UNIT_ALIASES = {
+    "Ω": ("ohms", "ohm", "Ω"),
+}
+_NUMBER = re.compile(r"([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(.*)")
+# Resistor-code style such as 4k7 (= 4.7k) or 2M2.
+_RKM = re.compile(r"(\d+)([pnuμmkKMG])(\d+)\s*(.*)")
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedQuantity:
+    value: float
+    #: True when the text named a prefix or unit; otherwise the caller decides the scale.
+    scaled: bool
+
+
+def parse_quantity(text: str, unit: str) -> ParsedQuantity:
+    """Read engineering input such as ``4.7k``, ``10 uF``, ``4k7``, ``2.2 MΩ`` or ``1e-6``.
+
+    Prefixes are case-sensitive where it matters: ``m`` is milli and ``M`` mega.
+    Raises ValueError for text that is not a finite number with an optional
+    prefix and unit.
+    """
+    cleaned = text.strip().replace("µ", "μ").replace("Ω", "Ω")
+    match = _RKM.fullmatch(cleaned)
+    if match is not None:
+        number = Decimal(f"{match[1]}.{match[3]}")
+        suffix = match[2] + match[4]
+    else:
+        match = _NUMBER.fullmatch(cleaned)
+        if match is None:
+            raise ValueError(f"Not a number: {text!r}")
+        number = Decimal(match[1])
+        suffix = match[2]
+    suffix = suffix.replace(" ", "")
+    has_unit = False
+    for alias in _UNIT_ALIASES.get(unit, (unit,)):
+        if len(suffix) >= len(alias) and suffix.lower().endswith(alias.lower()):
+            suffix = suffix[: len(suffix) - len(alias)]
+            has_unit = True
+            break
+    if suffix not in _INPUT_PREFIXES:
+        raise ValueError(f"Unknown unit prefix in {text!r}")
+    value = float(number.scaleb(_INPUT_PREFIXES[suffix]))
+    if not math.isfinite(value):
+        raise ValueError(f"Not a finite number: {text!r}")
+    return ParsedQuantity(value, bool(suffix) or has_unit)

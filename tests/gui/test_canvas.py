@@ -93,13 +93,19 @@ def test_scene_connects_arbitrary_component_terminals(qtbot) -> None:
 def test_equation_highlight_does_not_retrigger_component_navigation(qtbot) -> None:
     scene = CircuitScene(Circuit.new())
     resistor = scene.insert_component_at("resistor", QPointF(360.0, 180.0))
-    spy = QSignalSpy(scene.selection_changed)
     line = EquationLine("KVL1", "kvl", "V_R1 = 0", "0 = 0", "residual = 0", 0.0, (resistor,), ())
+
+    scene.clearSelection()
+    spy = QSignalSpy(scene.selection_changed)
 
     scene.highlight_equation(line)
 
-    assert scene.component_items[resistor].isSelected()
+    assert scene.component_items[resistor].highlighted
+    assert not scene.component_items[resistor].isSelected()
     assert spy.count() == 0
+
+    scene.highlight_equation(None)
+    assert not scene.component_items[resistor].highlighted
 
 
 def test_junction_dot_is_a_wire_start_and_end_target(qtbot) -> None:
@@ -228,3 +234,27 @@ def test_splitting_bent_wire_keeps_junction_and_bends_on_original_path(qtbot) ->
     assert scene.circuit.junctions[junction_id].position == (400.0, 320.0)
     assert scene.circuit.wires["W1"].route == ((400.0, 290.0),)
     assert second.route[:2] == ((400.0, 350.0), (700.0, 350.0))
+
+
+def test_start_here_guide_shows_only_while_the_circuit_is_empty(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+    assert scene.guide_item is not None
+    assert scene.guide_item.scene() is scene
+
+    scene.insert_component_on_wire("resistor", *scene.best_wire_insertion())
+
+    assert scene.guide_item is None
+    assert scene.command_stack.undo()
+    scene.rebuild()
+    assert scene.guide_item is not None
+
+
+def test_canvas_items_explain_themselves_on_hover(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+    resistor = scene.insert_component_on_wire("resistor", *scene.best_wire_insertion())
+
+    assert "double-click" in scene.component_items[resistor].toolTip()
+    assert "drag" in scene.component_items[resistor].terminals["a"].toolTip().lower()
+    assert "Double-click" in next(iter(scene.wire_items.values())).toolTip()
+    assert scene.battery_item is not None
+    assert "voltage" in scene.battery_item.toolTip()

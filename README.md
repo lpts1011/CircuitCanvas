@@ -22,7 +22,8 @@ The application does not call an external circuit simulator. Its Python solver a
 - Clean horizontal, vertical, or 45° wire routing—never arbitrary-angle segments
 - Movable components, 90° rotation, route-constrained junctions, and editable wire bends
 - Repeated addition of any practical number of R, C, and L components
-- Direct value entry, SI units, and logarithmic parameter sliders
+- Engineering-style value entry (`4.7k`, `10u`, `4k7`, `2.2 MΩ`) and logarithmic sliders
+- An automatic time span of about five time constants, so slow and fast circuits both show their whole response (or type your own span)
 - Live voltage and current labels next to every component
 - Animated blue arrows whose direction and speed follow solved wire current
 - Complete KCL, independent KVL-loop, and element-law equations
@@ -35,6 +36,7 @@ The application does not call an external circuit simulator. Its Python solver a
 - Versioned JSON save/load plus CSV and PNG export, with an unsaved-changes prompt
 - Undo/redo (a whole slider drag or voltage edit is one step) and revision-safe background calculation
 - Specific diagnostics for open, floating, singular, and non-finite circuits
+- Built-in examples, a quick start guide, a shortcut reference, and tooltips on every control and canvas item
 - Analytical tests against closed-form RC and RL solutions
 
 ## Install and run
@@ -53,18 +55,22 @@ On Windows, activate the environment with `.venv\Scripts\activate` before runnin
 
 ## Build a circuit
 
-1. The canvas opens with a battery and a complete construction loop. This wire-only loop is intentionally marked as a short circuit until you insert a component.
-2. Drop a component directly on a wire to replace that span and insert it **in series**. Palette clicks use the longest available span automatically.
-3. Select a component and choose **Add parallel** to create a fully wired parallel branch, or place a component away from a wire and connect it manually.
-4. Drag an orange terminal dot to another terminal to make a connection. Drop a new wire onto an existing wire to create a real electrical junction; a visual crossing without a junction dot remains disconnected.
-5. Shift-drag a junction dot to continue wiring from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
-6. Select a component and use **Rotate** (or `R`), the value field, or the logarithmic slider. **Delete**/**Backspace** removes whatever is selected: components, wires, junction dots, or bend handles.
-7. Scroll (or two-finger swipe) to pan the canvas. Zoom with ⌘/Ctrl + scroll, a trackpad pinch, or ⌘/Ctrl `+`/`−`; **Fit view** (⌘/Ctrl `0`) shows the whole circuit again.
-8. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation highlights its circuit elements.
-9. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
-10. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result.
+New here? Choose **Help ▸ Quick Start Guide** in the app, or **File ▸ Open Example** for a ready-made circuit.
 
-Five ready-to-run circuits are included in [`examples/`](examples), including [`parallel-series-17v.json`](examples/parallel-series-17v.json), where a 200 Ω resistor is parallel with a 100 Ω + 100 Ω series branch.
+1. The canvas opens with a battery, a complete construction loop, and a "Start here" card. The wire-only loop is intentionally marked as a short circuit until you insert a component.
+2. Click **Resistor**, **Capacitor**, or **Inductor** to insert it **in series** on the longest wire, or drag it onto the exact wire you want. The palette stays visible while you edit.
+3. Double-click a component (or select it) to edit it in the **Inspector**. Type values such as `4.7k`, `10u`, `4k7`, or `2.2 MΩ`, or drag the logarithmic slider. Double-click the battery to change its voltage.
+4. Choose **Add parallel** to create a fully wired parallel branch, or drop a component on empty canvas and connect it manually.
+5. Drag an orange terminal dot to another terminal to make a connection. Drop a new wire onto an existing wire to create a real electrical junction; a visual crossing without a junction dot remains disconnected.
+6. Shift-drag a junction dot to continue wiring from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
+7. **Rotate** (or `R`) turns the selected component. **Delete**/**Backspace** removes whatever is selected: components, wires, junction dots, or bend handles.
+8. Scroll (or two-finger swipe) to pan the canvas. Zoom with ⌘/Ctrl + scroll, a trackpad pinch, or ⌘/Ctrl `+`/`−`; **Fit view** (⌘/Ctrl `0`) shows the whole circuit again.
+9. **Time span** is automatic by default: about five of the circuit's slowest time constants, so an RC with τ = 10 s is simulated for 50 s. Type a value such as `200 ms` to set it yourself.
+10. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation outlines its circuit elements without changing the selection.
+11. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
+12. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result. With nothing selected, Export CSV saves every component in one table.
+
+Five ready-to-run circuits ship inside the package in [`src/circuitcanvas/examples/`](src/circuitcanvas/examples), including [`parallel-series-17v.json`](src/circuitcanvas/examples/parallel-series-17v.json), where a 200 Ω resistor is parallel with a 100 Ω + 100 Ω series branch.
 
 ## Mathematical model
 

@@ -26,6 +26,10 @@ class TerminalItem(QGraphicsObject):
         self.targeted = False
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setZValue(5)
+        self.setToolTip(
+            "Terminal: drag to another terminal or onto a wire to connect it.\n"
+            "Orange = not connected yet, blue = connected."
+        )
 
     def boundingRect(self) -> QRectF:
         return QRectF(-8, -8, 16, 16)
@@ -52,6 +56,11 @@ class JunctionItem(QGraphicsObject):
         )
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setZValue(4)
+        self.setToolTip(
+            "Junction: wires that meet here are connected.\n"
+            "Drag to slide it along its wire · Shift-drag to draw a new wire · "
+            "Delete to remove"
+        )
 
     def boundingRect(self) -> QRectF:
         return QRectF(-7, -7, 14, 14)
@@ -83,6 +92,7 @@ class RouteHandleItem(QGraphicsObject):
         )
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setZValue(6)
+        self.setToolTip("Bend: drag to reshape the wire · Delete to remove")
 
     def boundingRect(self) -> QRectF:
         return QRectF(-6, -6, 12, 12)
@@ -121,6 +131,11 @@ class WireItem(QGraphicsObject):
         self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsSelectable)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setZValue(-1)
+        self.setToolTip(
+            "Wire (no resistance). Drop a component here to insert it in series.\n"
+            "Double-click to add a bend · drop a new wire here to make a junction · "
+            "Delete to remove"
+        )
 
     def _path_from_points(self) -> QPainterPath:
         path = QPainterPath(self._points[0])

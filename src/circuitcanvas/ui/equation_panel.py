@@ -19,6 +19,7 @@ from circuitcanvas.solver.equations import EquationLine, EquationReport
 
 
 class EquationPanel(QWidget):
+    # Emits the EquationLine to highlight, or None when nothing should be highlighted.
     equation_selected = Signal(object)
 
     def __init__(self) -> None:
@@ -31,6 +32,15 @@ class EquationPanel(QWidget):
         heading = QLabel("KIRCHHOFF EQUATIONS")
         heading.setStyleSheet("font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px")
         layout.addWidget(heading)
+        caption = QLabel(
+            "KCL: currents into each junction add up to zero. "
+            "KVL: voltages around each loop add up to zero. "
+            "✓ = the solved numbers satisfy the equation. "
+            "Click an equation to outline its parts on the canvas."
+        )
+        caption.setWordWrap(True)
+        caption.setStyleSheet("color:#64748b;font-size:11px")
+        layout.addWidget(caption)
         toggle = QHBoxLayout()
         self.ordinary_button = QPushButton("Ordinary")
         self.differential_button = QPushButton("Differential")
@@ -38,6 +48,12 @@ class EquationPanel(QWidget):
             button.setCheckable(True)
             toggle.addWidget(button)
         self.ordinary_button.setChecked(True)
+        self.ordinary_button.setToolTip(
+            "Each equation with the solved values substituted, at the time shown on the graph"
+        )
+        self.differential_button.setToolTip(
+            "The whole circuit as one matrix differential equation, C·x′ + G·x = b"
+        )
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         self.mode_group.addButton(self.ordinary_button)
@@ -46,11 +62,11 @@ class EquationPanel(QWidget):
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        self.tree.setMinimumHeight(180)
+        self.tree.setMinimumHeight(140)
         layout.addWidget(self.tree)
         self.detail = QPlainTextEdit()
         self.detail.setReadOnly(True)
-        self.detail.setMinimumHeight(180)
+        self.detail.setMinimumHeight(110)
         self.detail.setStyleSheet("font-family:Menlo,monospace;font-size:11px")
         layout.addWidget(self.detail)
 
@@ -98,6 +114,16 @@ class EquationPanel(QWidget):
         self._lines = {}
         self.tree.clear()
         self.detail.clear()
+        self.equation_selected.emit(None)
+
+    def current_line(self) -> EquationLine | None:
+        """The equation whose elements should be highlighted on the canvas, if any."""
+        if not self.ordinary_button.isChecked():
+            return None
+        current = self.tree.currentItem()
+        if current is None:
+            return None
+        return self._lines.get(str(current.data(0, Qt.ItemDataRole.UserRole)))
 
     def visible_text(self) -> str:
         return self.detail.toPlainText()
@@ -137,6 +163,7 @@ class EquationPanel(QWidget):
             self._tree_selection_changed(current, None)
 
     def _show_differential(self) -> None:
+        self.equation_selected.emit(None)
         if self._report is None:
             self.detail.clear()
             return
