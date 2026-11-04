@@ -4,7 +4,7 @@
 
 **Build an electric circuit by clicking, and watch it work.** Add resistors, capacitors, and inductors to a battery loop. CircuitCanvas solves the circuit instantly and shows the voltage and current in every part, how they change over time, and the Kirchhoff equations behind them.
 
-![CircuitCanvas showing an RLC circuit ringing, with one Kirchhoff loop equation outlined on the canvas](docs/images/circuitcanvas-main.png)
+![CircuitCanvas showing an RLC circuit ringing: the circuit with live voltage and current readings, voltage and current graphs over time, and the Kirchhoff loop law outlined on the canvas](docs/images/circuitcanvas-main.png)
 
 ## Download
 
@@ -18,10 +18,10 @@ Get the app from the [latest release](https://github.com/lpts1011/CircuitCanvas/
 
 ## Your first circuit in one minute
 
-1. **Click Resistor** on the right. It drops into the battery loop and the circuit is solved: the resistor shows its voltage and current, and blue arrows show the current flowing.
+1. **Click Resistor** on the left. It drops into the battery loop and the circuit is solved: the resistor shows its voltage (blue) and current (orange), and arrows show the current flowing.
 2. **Click Capacitor.** Now it is an RC circuit, and the graph shows the capacitor charging.
 3. **Double-click the resistor** and type `10k`. The capacitor charges more slowly, and the time span grows automatically so you still see the whole curve.
-4. Press **Play** to watch it happen, or open **Equations** to see Kirchhoff's laws with the solved numbers filled in.
+4. Press **Play** at the top to watch it happen, or drag the time slider next to it. Open the **Kirchhoff's laws** tab to see the laws with the solved numbers filled in.
 
 Stuck? **Help → Quick Start Guide** (F1) explains the rest, and **File → Open Example** has five ready-made circuits. Saved circuits (`.circuitcanvas` files) open with a double-click on macOS.
 
@@ -64,16 +64,16 @@ The application does not call an external circuit simulator. Its Python solver a
 
 1. The canvas opens with a battery, a complete construction loop, and a "Start here" card. The wire-only loop is intentionally marked as a short circuit until you insert a component.
 2. Click **Resistor**, **Capacitor**, or **Inductor** to insert it **in series** on the longest wire, or drag it onto the exact wire you want. The palette stays visible while you edit.
-3. Double-click a component (or select it) to edit it in the **Inspector**. Type values such as `4.7k`, `10u`, `4k7`, or `2.2 MΩ`, or drag the logarithmic slider. Double-click the battery to change its voltage.
-4. Choose **Add parallel** to create a fully wired parallel branch, or drop a component on empty canvas and connect it manually.
+3. Double-click a component (or select it) to edit it in the **Details** panel on the right, which also shows its voltage, current, power, and stored energy at the chosen moment. Type values such as `4.7k`, `10u`, `4k7`, or `2.2 MΩ`, or drag the logarithmic slider. Double-click the battery to change its voltage. With nothing selected, the panel shows the whole circuit.
+4. Choose **Parallel copy** (or right-click → **Add parallel copy**) to create a fully wired parallel branch, or drop a component on empty canvas and connect it manually.
 5. Drag an orange terminal dot to another terminal to make a connection. Drop a new wire onto an existing wire to create a real electrical junction; a visual crossing without a junction dot remains disconnected.
 6. Shift-drag a junction dot to continue wiring from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
 7. **Rotate** (or `R`) turns the selected component. **Delete**/**Backspace** removes whatever is selected: components, wires, junction dots, or bend handles.
-8. Scroll (or two-finger swipe) to pan the canvas. Zoom with ⌘/Ctrl + scroll, a trackpad pinch, or ⌘/Ctrl `+`/`−`; **Fit view** (⌘/Ctrl `0`) shows the whole circuit again.
+8. Scroll (or two-finger swipe) to pan the canvas. Zoom with ⌘/Ctrl + scroll, a trackpad pinch, ⌘/Ctrl `+`/`−`, or the buttons in the canvas corner; the fit button (⌘/Ctrl `0`) shows the whole circuit again. Right-click anything for a menu of what you can do with it.
 9. **Time span** is automatic by default: about five of the circuit's slowest time constants, so an RC with τ = 10 s is simulated for 50 s. Type a value such as `200 ms` to set it yourself.
-10. Open **Equations** and switch between **Ordinary** and **Differential**. Selecting an equation outlines its circuit elements without changing the selection.
-11. Press **Play** to animate time and the blue current arrows, or drag the time cursor to inspect one instant.
-12. Use **Data table**, **Export CSV**, or **Export PNG** to keep the result. With nothing selected, Export CSV saves every component in one table.
+10. Open **Kirchhoff's laws** and switch between **With numbers** and **Matrix form**. Selecting a law outlines its circuit elements without changing the selection.
+11. Press **Play** or drag the time slider at the top (or the dashed line on a graph) to see the circuit at any moment. The graphs show the selected component, or the battery when nothing is selected; **Table** lists every sample.
+12. Use **File → Export Data (CSV)** or **Export Picture (PNG)** to keep the result. With nothing selected, the CSV holds every component in one table.
 
 Five ready-to-run circuits ship inside the package in [`src/circuitcanvas/examples/`](src/circuitcanvas/examples), including [`parallel-series-17v.json`](src/circuitcanvas/examples/parallel-series-17v.json), where a 200 Ω resistor is parallel with a 100 Ω + 100 Ω series branch.
 

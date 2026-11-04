@@ -33,8 +33,12 @@ def main() -> int:
 
     def prepare_capture() -> None:
         window.sidebar_tabs.setCurrentWidget(window.equations)
-        window.scene.component_items["C1"].setSelected(True)
+        window.scene.select_only("C1")
         window.equations.select_equation("KVL1")
+        # A moment during the first swing, so the readings and cursor are interesting.
+        result = window.current_result
+        if result is not None:
+            window.time_bar.slider.setValue(len(result.time) // 6)
         window.statusBar().clearMessage()
         window.view.fit_circuit()
         QTimer.singleShot(300, capture)

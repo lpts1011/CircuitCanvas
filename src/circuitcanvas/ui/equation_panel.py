@@ -17,6 +17,18 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.solver.equations import EquationLine, EquationReport
 
+_LAW_NAMES = {"R": "Ohm's law", "C": "capacitor law", "L": "inductor law"}
+
+
+def line_name(line: EquationLine, position: int) -> str:
+    """A readable name such as "Junction 2", "Loop 1", or "R1: Ohm's law"."""
+    if line.kind == "kcl":
+        return f"Junction {position}"
+    if line.kind == "kvl":
+        return f"Loop {position}"
+    component_id = line.id.removeprefix("LAW-")
+    return f"{component_id}: {_LAW_NAMES.get(component_id[:1], 'component law')}"
+
 
 class EquationPanel(QWidget):
     # Emits the EquationLine to highlight, or None when nothing should be highlighted.
@@ -27,23 +39,21 @@ class EquationPanel(QWidget):
         self._report: EquationReport | None = None
         self._lines: dict[str, EquationLine] = {}
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
 
-        heading = QLabel("KIRCHHOFF EQUATIONS")
-        heading.setStyleSheet("font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px")
-        layout.addWidget(heading)
         caption = QLabel(
-            "KCL: currents into each junction add up to zero. "
-            "KVL: voltages around each loop add up to zero. "
-            "✓ = the solved numbers satisfy the equation. "
-            "Click an equation to outline its parts on the canvas."
+            "Kirchhoff's laws for this circuit, with the solved numbers filled in. "
+            "Currents into every junction add up to zero, and voltages around every loop "
+            "add up to zero. ✓ means the numbers balance. Click a line to outline its "
+            "parts on the canvas."
         )
         caption.setWordWrap(True)
-        caption.setStyleSheet("color:#64748b;font-size:11px")
+        caption.setObjectName("hint")
         layout.addWidget(caption)
         toggle = QHBoxLayout()
-        self.ordinary_button = QPushButton("Ordinary")
-        self.differential_button = QPushButton("Differential")
+        self.ordinary_button = QPushButton("With numbers")
+        self.differential_button = QPushButton("Matrix form")
         for button in (self.ordinary_button, self.differential_button):
             button.setCheckable(True)
             toggle.addWidget(button)
@@ -85,16 +95,18 @@ class EquationPanel(QWidget):
         self._lines = {line.id: line for line in (*report.kcl, *report.kvl, *report.laws)}
         self.tree.clear()
         for title, lines in (
-            ("KCL nodes", report.kcl),
-            ("KVL loops", report.kvl),
-            ("Element laws", report.laws),
+            ("Junctions: current law (KCL)", report.kcl),
+            ("Loops: voltage law (KVL)", report.kvl),
+            ("Each component's own law", report.laws),
         ):
             parent = QTreeWidgetItem([title])
             self.tree.addTopLevelItem(parent)
-            for line in lines:
+            for position, line in enumerate(lines, start=1):
+                name = line_name(line, position)
                 child = QTreeWidgetItem(
-                    [f"✓ {line.id}" if abs(line.residual) <= 1e-9 else f"⚠ {line.id}"]
+                    [f"✓ {name}" if abs(line.residual) <= 1e-9 else f"⚠ {name}"]
                 )
+                child.setToolTip(0, line.symbolic)
                 child.setData(0, Qt.ItemDataRole.UserRole, line.id)
                 child.setForeground(
                     0,

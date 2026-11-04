@@ -30,14 +30,14 @@ QUICK_START_HTML = (
 <h2>Build your first circuit</h2>
 <ol>
   <li><b>Add a component.</b> Click <i>Resistor</i>, <i>Capacitor</i> or <i>Inductor</i>
-  on the right. It is placed in series on the longest wire. You can also drag it onto
+  on the left. It is placed in series on the longest wire. You can also drag it onto
   the exact wire you want.</li>
-  <li><b>Set its value.</b> Double-click the component (or select it and use the
-  Inspector). Type values such as <code>4.7k</code>, <code>10u</code> or <code>4k7</code>,
-  or drag the slider.</li>
-  <li><b>Read the results.</b> Every component shows its voltage and current. The graph
-  below the canvas shows how the selected component changes after the battery is
-  connected. Press <b>Play</b> to watch the current arrows move.</li>
+  <li><b>Set its value.</b> Double-click the component, or select it and use the
+  <i>Details</i> panel on the right. Type values such as <code>4.7k</code>,
+  <code>10u</code> or <code>4k7</code>, or drag the slider.</li>
+  <li><b>Watch it work.</b> Press <b>Play</b> at the top, or drag the time slider next to
+  it. Every component shows its voltage (blue) and current (orange) at that moment, and
+  the graphs below the canvas show the whole response over time.</li>
 </ol>
 
 <h3>Wiring by hand</h3>
@@ -48,7 +48,8 @@ QUICK_START_HTML = (
   Wires that merely cross are <i>not</i> connected.</li>
   <li>Shift-drag a junction dot to start a new wire from it. Double-click a wire to add
   a bend that you can drag.</li>
-  <li>Select anything and press <b>Delete</b> to remove it. Every edit can be undone.</li>
+  <li>Select anything and press <b>Delete</b> to remove it, or right-click it for more
+  choices. Every edit can be undone.</li>
 </ul>
 
 <h3>Understanding what you see</h3>
@@ -56,11 +57,11 @@ QUICK_START_HTML = (
   <li><b>Time span</b>: <i>Auto</i> simulates long enough for capacitors to charge and
   inductor currents to settle (about five time constants). Type your own value to
   override it.</li>
-  <li><b>Equations tab</b>: Kirchhoff's current law (KCL) for every junction, the voltage
+  <li><b>Kirchhoff's laws tab</b>: the current law (KCL) for every junction, the voltage
   law (KVL) for every loop, and each component's own law, with the solved numbers
   filled in. ✓ means the equation balances.</li>
-  <li>If the circuit cannot be solved, the message at the bottom right says what to fix,
-  for example a terminal that is not connected yet.</li>
+  <li>If the circuit cannot be solved, a message above the circuit says what to fix and
+  the component that causes it is outlined in red.</li>
 </ul>
 
 <h3>Moving around</h3>

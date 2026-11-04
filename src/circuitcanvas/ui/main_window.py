@@ -7,16 +7,15 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+import numpy as np
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
-    QDoubleSpinBox,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
-    QLabel,
     QMainWindow,
     QMessageBox,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QToolBar,
@@ -28,26 +27,34 @@ from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.serialization import CircuitFileError, load_circuit, save_circuit
 from circuitcanvas.examples import EXAMPLES, Example, load_example
 from circuitcanvas.solver.equations import EquationLine, build_equation_report
-from circuitcanvas.solver.results import SimulationResult
+from circuitcanvas.solver.results import BranchResult, SimulationResult
 from circuitcanvas.solver.validation import Diagnostic
 from circuitcanvas.solver.wire_flow import reconstruct_wire_flows
 
 from .analysis_panel import AnalysisPanel
 from .circuit_scene import CircuitScene, CircuitView
+from .details_panel import DetailsPanel
 from .equation_panel import EquationPanel
 from .export import export_all_branches_csv, export_branch_csv, export_scene_png
 from .formatting import format_si
 from .help import ABOUT_HTML, QUICK_START_HTML, HelpDialog, shortcuts_html
+from .icons import icon
 from .inspector import ComponentInspector
+from .messages import describe
 from .palette import ComponentPalette
 from .playback import PlaybackController
 from .simulation_controller import SimulationController
+from .theme import KIND_NAMES
+from .time_bar import TimeBar
 
 
 class MainWindow(QMainWindow):
+    """Canvas in the middle, components on the left, details on the right, graphs below."""
+
     def __init__(self, *, debounce_ms: int = 150) -> None:
         super().__init__()
-        self.resize(1420, 880)
+        self.resize(1440, 900)
+        self.setMinimumSize(1100, 680)
         self.circuit = Circuit.starter_loop(12.0)
         self.current_result: SimulationResult | None = None
         self.current_time_index = 0
@@ -62,18 +69,27 @@ class MainWindow(QMainWindow):
         self.analysis = AnalysisPanel()
         self.component_palette = ComponentPalette()
         self.inspector = ComponentInspector()
+        self.details = DetailsPanel(self.inspector)
+        self.source_voltage = self.details.source_voltage
+        self.status_label = self.details.status_label
         self.equations = EquationPanel()
+        self.time_bar = TimeBar()
         self.controller = SimulationController(debounce_ms=debounce_ms, parent=self)
         self.playback = PlaybackController(self)
 
+        self._build_actions()
         self._build_toolbar()
         self._build_menus()
         self._build_layout()
         self._connect_signals()
-        # Shows toolbar hints on hover and confirmations such as "Saved …".
+        # Shows hints on hover and confirmations such as "Saved …".
         self.statusBar().setSizeGripEnabled(False)
         self._update_title()
+        self.details.set_status("info", "Working out the circuit…")
+        self.details.clear_readings(0)
         self.controller.request(self.circuit.revision, self.circuit.snapshot())
+
+    # ----- Actions, toolbar, menus ------------------------------------------------------
 
     def _action(
         self,
@@ -83,11 +99,14 @@ class MainWindow(QMainWindow):
         shortcuts: Sequence[QKeySequence | QKeySequence.StandardKey | str] = (),
         *,
         button_text: str | None = None,
+        icon_name: str | None = None,
     ) -> QAction:
         """Create an action; ``text`` is the menu label, ``button_text`` the toolbar label."""
         action = QAction(text, self)
         if button_text is not None:
             action.setIconText(button_text)
+        if icon_name is not None:
+            action.setIcon(icon(icon_name))
         # Some standard keys have no binding on some platforms (e.g. Save As on Windows).
         keys: list[QKeySequence] = []
         for shortcut in shortcuts:
@@ -103,20 +122,22 @@ class MainWindow(QMainWindow):
         action.triggered.connect(slot)
         return action
 
-    def _build_toolbar(self) -> None:
-        toolbar = QToolBar("Main")
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.addToolBar(toolbar)
-
+    def _build_actions(self) -> None:
         standard = QKeySequence.StandardKey
         self.new_action = self._action(
-            "New", self.reset_circuit, "Start a new circuit", [standard.New]
+            "New", self.reset_circuit, "Start a new circuit", [standard.New], icon_name="new"
         )
         self.open_action = self._action(
-            "Open…", self.open_file, "Open a saved circuit", [standard.Open], button_text="Open"
+            "Open…",
+            self.open_file,
+            "Open a saved circuit",
+            [standard.Open],
+            button_text="Open",
+            icon_name="open",
         )
-        self.save_action = self._action("Save", self.save_file, "Save the circuit", [standard.Save])
+        self.save_action = self._action(
+            "Save", self.save_file, "Save the circuit", [standard.Save], icon_name="save"
+        )
         self.save_as_action = self._action(
             "Save As…",
             self.save_file_as,
@@ -124,27 +145,44 @@ class MainWindow(QMainWindow):
             [standard.SaveAs, "Ctrl+Shift+S"],
             button_text="Save As",
         )
-        self.undo_action = self._action("Undo", self.undo, "Undo the last edit", [standard.Undo])
+        self.undo_action = self._action(
+            "Undo", self.undo, "Undo the last edit", [standard.Undo], icon_name="undo"
+        )
         self.redo_action = self._action(
-            "Redo", self.redo, "Redo the last undone edit", [standard.Redo]
+            "Redo", self.redo, "Redo the last undone edit", [standard.Redo], icon_name="redo"
         )
         self.rotate_action = self._action(
-            "Rotate", self.scene.rotate_selected, "Rotate the selected component 90°", ["R"]
+            "Rotate",
+            self.scene.rotate_selected,
+            "Rotate the selected component 90°",
+            ["R"],
+            icon_name="rotate",
         )
         self.delete_action = self._action(
             "Delete",
             self._delete_selected,
             "Delete the selected components, wires, junctions, or bends",
             [QKeySequence(Qt.Key.Key_Delete), QKeySequence(Qt.Key.Key_Backspace)],
+            icon_name="trash",
+        )
+        self.deselect_action = self._action(
+            "Deselect", self.scene.clearSelection, "Deselect everything", ["Esc"]
+        )
+        self.play_action = self._action(
+            "Play or Pause", self.time_bar.play_button.toggle, "Play or pause", ["Space"]
         )
         self.fit_action = self._action(
-            "Fit view", self.view.fit_circuit, "Show the whole circuit", ["Ctrl+0"]
+            "Fit View", self.view.fit_circuit, "Show the whole circuit", ["Ctrl+0"], icon_name="fit"
         )
         self.zoom_in_action = self._action(
-            "Zoom in", self.view.zoom_in, "Zoom in", [standard.ZoomIn, "Ctrl+="]
+            "Zoom In",
+            self.view.zoom_in,
+            "Zoom in",
+            [standard.ZoomIn, "Ctrl+="],
+            icon_name="zoom-in",
         )
         self.zoom_out_action = self._action(
-            "Zoom out", self.view.zoom_out, "Zoom out", [standard.ZoomOut]
+            "Zoom Out", self.view.zoom_out, "Zoom out", [standard.ZoomOut], icon_name="zoom-out"
         )
         self.export_png_action = self._action(
             "Export Picture (PNG)…",
@@ -168,6 +206,8 @@ class MainWindow(QMainWindow):
             self.show_quick_start,
             "How to build and read a circuit",
             [standard.HelpContents, "F1"],
+            button_text="Help",
+            icon_name="help",
         )
         self.shortcuts_action = self._action(
             "Keyboard Shortcuts", self.show_shortcuts, "Every shortcut and mouse gesture"
@@ -176,24 +216,29 @@ class MainWindow(QMainWindow):
             "About CircuitCanvas", self.show_about, "Version and license"
         )
         self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
-        groups: tuple[tuple[QAction, ...], ...] = (
-            (self.new_action, self.open_action, self.save_action, self.save_as_action),
-            (self.undo_action, self.redo_action),
-            (self.rotate_action, self.delete_action),
-            (self.fit_action,),
-            (self.export_png_action, self.export_csv_action),
-        )
-        for index, group in enumerate(groups):
-            if index:
-                toolbar.addSeparator()
-            for action in group:
-                toolbar.addAction(action)
-        # Zoom shortcuts work anywhere in the window without crowding the toolbar.
-        self.addActions([self.zoom_in_action, self.zoom_out_action])
+        # Shortcuts work anywhere in the window, whether or not a menu shows the action.
+        self.addActions(self._all_actions())
+
+    def _build_toolbar(self) -> None:
+        toolbar = QToolBar("Main")
+        toolbar.setObjectName("mainToolbar")
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
+        self.addToolBar(toolbar)
+        toolbar.addActions([self.new_action, self.open_action, self.save_action])
         toolbar.addSeparator()
-        brand = QLabel("  ⚡ CircuitCanvas")
-        brand.setStyleSheet("font-size:16px;font-weight:700;color:#dbeafe;background:transparent")
-        toolbar.addWidget(brand)
+        toolbar.addActions([self.undo_action, self.redo_action])
+        toolbar.addSeparator()
+        self.time_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(self.time_bar)
+        toolbar.addSeparator()
+        toolbar.addAction(self.quick_start_action)
+        help_button = toolbar.widgetForAction(self.quick_start_action)
+        if help_button is not None:
+            help_button.setProperty("toolButtonStyle", Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
 
     def _build_menus(self) -> None:
         menu_bar = self.menuBar()
@@ -219,10 +264,12 @@ class MainWindow(QMainWindow):
         edit_menu = menu_bar.addMenu("&Edit")
         edit_menu.addActions([self.undo_action, self.redo_action])
         edit_menu.addSeparator()
-        edit_menu.addActions([self.rotate_action, self.delete_action])
+        edit_menu.addActions([self.rotate_action, self.delete_action, self.deselect_action])
 
         view_menu = menu_bar.addMenu("&View")
         view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.fit_action])
+        view_menu.addSeparator()
+        view_menu.addAction(self.play_action)
 
         help_menu = menu_bar.addMenu("&Help")
         help_menu.addActions([self.quick_start_action, self.shortcuts_action])
@@ -239,6 +286,8 @@ class MainWindow(QMainWindow):
             self.redo_action,
             self.rotate_action,
             self.delete_action,
+            self.deselect_action,
+            self.play_action,
             self.zoom_in_action,
             self.zoom_out_action,
             self.fit_action,
@@ -262,86 +311,51 @@ class MainWindow(QMainWindow):
     def show_about(self) -> HelpDialog:
         return self._show_help("About CircuitCanvas", ABOUT_HTML)
 
+    # ----- Layout -------------------------------------------------------------------------
+
     def _build_layout(self) -> None:
         root = QWidget()
         root_layout = QHBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        root_layout.setSpacing(0)
+        root_layout.addWidget(self.component_palette)
 
-        center = QSplitter(Qt.Orientation.Vertical)
-        center.addWidget(self.view)
-        analysis_frame = QFrame()
-        analysis_layout = QVBoxLayout(analysis_frame)
-        analysis_layout.setContentsMargins(16, 12, 16, 12)
-        analysis_layout.addWidget(self.analysis)
-        center.addWidget(analysis_frame)
-        center.setSizes([590, 270])
+        self.center_split = QSplitter(Qt.Orientation.Vertical)
+        self.center_split.setHandleWidth(1)
+        self.center_split.setChildrenCollapsible(False)
+        self.center_split.addWidget(self.view)
+        self.analysis.setMinimumHeight(230)
+        self.center_split.addWidget(self.analysis)
+        self.center_split.setStretchFactor(0, 3)
+        self.center_split.setStretchFactor(1, 2)
+        self.center_split.setSizes([500, 320])
 
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(320)
-        sidebar.setMaximumWidth(390)
-        side = QVBoxLayout(sidebar)
-        side.setContentsMargins(20, 16, 20, 16)
-        side.setSpacing(14)
-
-        source_heading = QLabel("DC SOURCE")
-        source_heading.setStyleSheet(
-            "font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px"
-        )
-        side.addWidget(source_heading)
-        source_row = QHBoxLayout()
-        source_row.addWidget(QLabel("Battery voltage"))
-        self.source_voltage = QDoubleSpinBox()
-        self.source_voltage.setRange(0.001, 1000.0)
-        self.source_voltage.setDecimals(3)
-        self.source_voltage.setValue(12.0)
-        self.source_voltage.setSuffix(" V")
-        self.source_voltage.setToolTip(
-            "Voltage of the ideal DC battery. It is switched on at t = 0.\n"
-            "Tip: double-click the battery on the canvas to edit this."
-        )
-        source_row.addWidget(self.source_voltage)
-        side.addLayout(source_row)
-        # The palette stays visible so components can be added while editing one.
-        side.addWidget(self.component_palette)
+        side = QWidget()
+        side.setObjectName("sidePanel")
+        side.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        side.setMinimumWidth(300)
+        side.setMaximumWidth(400)
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_tabs = QTabWidget()
-        self.sidebar_tabs.addTab(self.inspector, "Inspector")
-        self.sidebar_tabs.addTab(self.equations, "Equations")
-        self.sidebar_tabs.setTabToolTip(0, "Edit the selected component")
+        self.sidebar_tabs.setDocumentMode(True)
+        self.sidebar_tabs.addTab(self.details, "Details")
+        self.sidebar_tabs.addTab(self.equations, "Kirchhoff's laws")
+        self.sidebar_tabs.setTabToolTip(0, "The circuit, or the component you selected")
         self.sidebar_tabs.setTabToolTip(
             1, "Kirchhoff's laws for this circuit, with the solved numbers filled in"
         )
-        self.sidebar_tabs.setMinimumHeight(300)
-        side.addWidget(self.sidebar_tabs, 1)
-        side.addWidget(self._separator())
-        summary_heading = QLabel("CIRCUIT SUMMARY")
-        summary_heading.setStyleSheet(
-            "font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px"
-        )
-        side.addWidget(summary_heading)
-        self.summary_label = QLabel("Waiting for a complete circuit")
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet("color:#475569;line-height:1.4")
-        side.addWidget(self.summary_label)
-        side.addStretch()
-        self.status_label = QLabel("Open circuit · add a component")
-        self.status_label.setWordWrap(True)
-        side.addWidget(self.status_label)
+        side_layout.addWidget(self.sidebar_tabs)
 
-        splitter.addWidget(center)
-        splitter.addWidget(sidebar)
-        splitter.setStretchFactor(0, 1)
-        splitter.setSizes([1030, 390])
-        root_layout.addWidget(splitter)
+        self.main_split = QSplitter(Qt.Orientation.Horizontal)
+        self.main_split.setHandleWidth(1)
+        self.main_split.setChildrenCollapsible(False)
+        self.main_split.addWidget(self.center_split)
+        self.main_split.addWidget(side)
+        self.main_split.setStretchFactor(0, 1)
+        self.main_split.setSizes([1040, 320])
+        root_layout.addWidget(self.main_split, 1)
         self.setCentralWidget(root)
-
-    @staticmethod
-    def _separator() -> QFrame:
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("color:#e2e8f0")
-        return line
 
     def _connect_signals(self) -> None:
         self.component_palette.component_clicked.connect(self.add_component)
@@ -349,25 +363,31 @@ class MainWindow(QMainWindow):
         self.scene.selection_changed.connect(self._selection_changed)
         self.scene.component_activated.connect(self.edit_component)
         self.scene.source_activated.connect(self._edit_source_voltage)
+        self.view.edit_requested.connect(self.edit_component)
+        self.view.parallel_requested.connect(self._duplicate_parallel)
         self.inspector.value_changed.connect(self._update_value)
         self.inspector.value_adjusted.connect(self._adjust_value)
         self.inspector.delete_requested.connect(self._delete_component)
         self.inspector.rotate_requested.connect(self.scene.rotate_component)
         self.inspector.parallel_requested.connect(self._duplicate_parallel)
-        self.analysis.time_index_changed.connect(self._time_index_changed)
+        self.details.back_requested.connect(self.scene.clearSelection)
         self.source_voltage.valueChanged.connect(self._source_changed)
         self.source_voltage.editingFinished.connect(self._end_source_edit)
         self.controller.result_ready.connect(self._apply_result)
         self.controller.diagnostics_ready.connect(self._apply_diagnostics)
         self.equations.equation_selected.connect(self._equation_selected)
         self.sidebar_tabs.currentChanged.connect(self._sidebar_tab_changed)
-        self.analysis.play_toggled.connect(self.playback.set_playing)
-        self.analysis.speed_changed.connect(self.playback.set_speed)
+        self.time_bar.play_toggled.connect(self.playback.set_playing)
+        self.time_bar.speed_changed.connect(self.playback.set_speed)
+        self.time_bar.time_index_changed.connect(self._scrubbed)
+        self.analysis.cursor_index_changed.connect(self._scrubbed)
         self.analysis.auto_span_requested.connect(self._use_auto_span)
         self.analysis.manual_span_requested.connect(self._use_manual_span)
-        self.playback.playing_changed.connect(self.analysis.set_playing)
+        self.playback.playing_changed.connect(self.time_bar.set_playing)
         self.playback.animation_tick.connect(self.scene.advance_arrows)
-        self.playback.time_index_changed.connect(self.analysis.time_slider.setValue)
+        self.playback.time_index_changed.connect(self._show_time_index)
+
+    # ----- Editing ----------------------------------------------------------------------
 
     def add_component(self, kind: str) -> str:
         if self.circuit.wires:
@@ -384,25 +404,25 @@ class MainWindow(QMainWindow):
         component = self.circuit.components.get(component_id)
         if component is None:
             self.inspector.clear_component()
-            return
-        self.inspector.set_component(component)
-        if self.current_result is not None and component_id in self.current_result.branches:
-            self.analysis.set_branch(
-                component_id,
-                self.current_result.time,
-                self.current_result.branches[component_id],
-            )
-        self.equations.reveal_component(component_id)
+            self.details.show_overview()
+        else:
+            self.inspector.set_component(component)
+            self.details.show_component(component)
+            self.equations.reveal_component(component_id)
+        self._refresh_graph()
+        self._update_readings()
 
     def edit_component(self, component_id: str) -> None:
         """Select a component and put the cursor in its value field."""
         if component_id not in self.scene.component_items:
             return
         self.scene.select_only(component_id)
-        self.sidebar_tabs.setCurrentWidget(self.inspector)
+        self.sidebar_tabs.setCurrentWidget(self.details)
         self.inspector.focus_value()
 
     def _edit_source_voltage(self) -> None:
+        self.scene.clearSelection()
+        self.sidebar_tabs.setCurrentWidget(self.details)
         self.source_voltage.setFocus(Qt.FocusReason.OtherFocusReason)
         self.source_voltage.selectAll()
 
@@ -414,6 +434,8 @@ class MainWindow(QMainWindow):
         self.scene.highlight_equation(line if self._equations_visible() else None)
 
     def _sidebar_tab_changed(self, _index: int) -> None:
+        if self._equations_visible():
+            self._refresh_equations()
         self._equation_selected(self.equations.current_line())
 
     def _update_value(self, component_id: str, value: float) -> None:
@@ -432,14 +454,11 @@ class MainWindow(QMainWindow):
     def _delete_component(self, component_id: str) -> None:
         self.scene.command_stack.delete(component_id)
         self.inspector.clear_component()
-        self.analysis.clear()
         self.scene.rebuild()
         self._circuit_changed(self.circuit.revision)
 
     def _delete_selected(self) -> None:
-        before = set(self.circuit.components)
-        if self.scene.delete_selected() and not before <= set(self.circuit.components):
-            self.analysis.clear()
+        self.scene.delete_selected()
 
     def _duplicate_parallel(self, component_id: str) -> None:
         if self.circuit.wires:
@@ -486,65 +505,145 @@ class MainWindow(QMainWindow):
         )
         self._circuit_changed(self.circuit.revision)
 
+    # ----- Results ----------------------------------------------------------------------
+
     def _apply_result(self, revision: int, result: SimulationResult) -> None:
         if revision != self.circuit.revision:
             return
         self.current_result = result
         index = len(result.time) - 1
-        self.current_time_index = index
         self.playback.set_timeline(samples=len(result.time), duration=float(result.time[-1]))
+        self.time_bar.set_timeline(result.time)
         self.analysis.show_time_span(
             float(result.time[-1]), auto=self.circuit.settings.auto_duration
         )
-        self.scene.set_result(result, index)
-        snapshot = self.circuit.snapshot()
-        self.equations.set_report(build_equation_report(snapshot, result, index))
-        flows = reconstruct_wire_flows(snapshot, result, index)
-        self.scene.set_wire_currents(dict(flows.currents))
-        selected = self.scene.selected_component_id()
-        if selected is not None and selected in result.branches:
-            self.analysis.set_branch(selected, result.time, result.branches[selected])
-        current = abs(float(result.source_current[-1]))
-        power = abs(float(result.source_power[-1]))
-        energy = float(result.metrics["stored_energy_j"])
-        self.summary_label.setText(
-            f"Source: {format_si(self.circuit.source.voltage, 'V')} DC\n"
-            f"Total current: {format_si(current, 'A')}\n"
-            f"Total power: {format_si(power, 'W')}\n"
-            f"Stored energy: {format_si(energy, 'J')}\n"
-            f"Components: {len(self.circuit.components)}"
+        self.scene.set_problem_components(())
+        self.view.hide_banner()
+        self.details.set_status(
+            "ok",
+            "✓ Circuit solved. Press <b>Play</b>, or drag the time slider at the top, "
+            "to watch it change after the battery is connected.",
         )
-        self.status_label.setText("✓ Circuit valid · transient solution converged")
-        self.status_label.setStyleSheet(
-            "background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;"
-            "padding:10px;border-radius:9px"
-        )
+        self._refresh_graph()
+        self._show_time_index(index)
+        self._refresh_equations()
 
     def _apply_diagnostics(self, revision: int, diagnostics: tuple[Diagnostic, ...]) -> None:
         if revision != self.circuit.revision:
             return
-        first = diagnostics[0]
-        if first.code == "source-short" and not self.circuit.components:
-            message = "Starter loop is a short circuit · place a component on a wire"
-        else:
-            message = first.message
-        self.status_label.setText(f"⚠ {message}")
-        self.status_label.setStyleSheet(
-            "background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;"
-            "padding:10px;border-radius:9px"
-        )
-        self.summary_label.setText("Waiting for a valid closed circuit")
-        self.equations.clear()
+        problem = describe(diagnostics[0], has_components=bool(self.circuit.components))
+        self.current_result = None
         self.playback.set_playing(False)
+        self.time_bar.clear()
+        self.equations.clear()
+        self.scene.clear_results()
+        self.scene.set_problem_components(problem.component_ids)
+        if problem.show_on_canvas:
+            self.view.show_banner(problem.kind, problem.text)
+            self.view.reveal(problem.component_ids)
+        else:
+            self.view.hide_banner()
+        mark = "⚠ " if problem.kind == "problem" else ""
+        self.details.set_status(problem.kind, mark + problem.text)
+        self.details.clear_readings(
+            len(self.circuit.components), "No readings until the circuit is complete"
+        )
+        self.analysis.show_placeholder(
+            "Graphs appear here once the circuit is complete."
+            if self.circuit.components
+            else "Add a component to see how it behaves over time."
+        )
 
-    def _time_index_changed(self, index: int) -> None:
+    def _scrubbed(self, index: int) -> None:
+        """The user picked a moment on the time slider or a graph."""
+        self.playback.seek(index)
+        self._show_time_index(index)
+
+    def _show_time_index(self, index: int) -> None:
+        result = self.current_result
+        if result is None:
+            return
+        index = max(0, min(index, len(result.time) - 1))
+        self.current_time_index = index
+        self.time_bar.set_index(index)
+        self.analysis.set_cursor_index(index)
+        self.scene.set_result(result, index)
+        flows = reconstruct_wire_flows(self.circuit.snapshot(), result, index)
+        self.scene.set_wire_currents(dict(flows.currents))
+        if self._equations_visible():
+            self._refresh_equations()
+        self._update_readings()
+
+    def _refresh_equations(self) -> None:
         if self.current_result is not None:
-            self.current_time_index = index
-            self.scene.set_result(self.current_result, index)
-            snapshot = self.circuit.snapshot()
-            self.equations.set_report(build_equation_report(snapshot, self.current_result, index))
-            flows = reconstruct_wire_flows(snapshot, self.current_result, index)
-            self.scene.set_wire_currents(dict(flows.currents))
+            self.equations.set_report(
+                build_equation_report(
+                    self.circuit.snapshot(), self.current_result, self.current_time_index
+                )
+            )
+
+    def _battery_series(self, result: SimulationResult) -> BranchResult:
+        """The battery as a branch: positive current and power while it delivers energy."""
+        voltage = np.full_like(result.time, self.circuit.source.voltage)
+        voltage[0] = 0.0
+        current = -np.asarray(result.source_current)
+        power = -np.asarray(result.source_power)
+        return BranchResult(voltage, current, power, np.zeros_like(result.time))
+
+    def _refresh_graph(self) -> None:
+        result = self.current_result
+        if result is None:
+            return
+        selected = self.scene.selected_component_id()
+        if selected is not None and selected in result.branches:
+            kind = KIND_NAMES[self.circuit.components[selected].kind.value].lower()
+            self.analysis.set_branch(
+                selected,
+                result.time,
+                result.branches[selected],
+                title=f"{selected} ({kind}) over time",
+            )
+        else:
+            self.analysis.set_branch(
+                "Battery",
+                result.time,
+                self._battery_series(result),
+                title="Battery over time · select a component to see its own graphs",
+            )
+        self.analysis.set_cursor_index(self.current_time_index)
+
+    def _moment_text(self) -> str:
+        result = self.current_result
+        if result is None:
+            return ""
+        index = self.current_time_index
+        moment = f"At t = {format_si(float(result.time[index]), 's', digits=3)}"
+        return moment + (" (end of the time span)" if index == len(result.time) - 1 else "")
+
+    def _update_readings(self) -> None:
+        result = self.current_result
+        if result is None:
+            return
+        index = max(0, min(self.current_time_index, len(result.time) - 1))
+        when = self._moment_text()
+        selected = self.scene.selected_component_id()
+        if selected is not None and selected in result.branches:
+            branch = result.branches[selected]
+            self.details.set_component_readings(
+                when,
+                format_si(float(branch.voltage[index]), "V"),
+                format_si(float(branch.current[index]), "A"),
+                format_si(float(branch.power[index]), "W"),
+                format_si(float(branch.energy[index]), "J"),
+            )
+        energy = sum(float(branch.energy[index]) for branch in result.branches.values())
+        self.details.set_circuit_readings(
+            when,
+            format_si(-float(result.source_current[index]), "A"),
+            format_si(-float(result.source_power[index]), "W"),
+            format_si(energy, "J"),
+            len(self.circuit.components),
+        )
 
     def undo(self) -> None:
         if self.scene.command_stack.undo():
@@ -622,7 +721,10 @@ class MainWindow(QMainWindow):
         self.current_result = None
         self.scene.replace_circuit(circuit)
         self.inspector.clear_component()
+        self.details.show_overview()
         self.analysis.clear()
+        self.time_bar.clear()
+        self.view.hide_banner()
         self.equations.clear()
         self._end_source_edit()
         self._sync_source_control()
@@ -728,8 +830,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Nothing to export yet",
-                "The circuit has no result yet. Follow the message at the bottom right "
-                "to complete the circuit, then export again.",
+                "The circuit has no result yet. Follow the message above the circuit "
+                "to complete it, then export again.",
             )
             return
         selected = self.scene.selected_component_id()

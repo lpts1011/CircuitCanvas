@@ -5,23 +5,31 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QContextMenuEvent,
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
     QNativeGestureEvent,
     QPainter,
     QPen,
+    QResizeEvent,
     QTransform,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
+    QFrame,
+    QGraphicsItem,
     QGraphicsLineItem,
     QGraphicsScene,
     QGraphicsSceneMouseEvent,
     QGraphicsView,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QToolButton,
     QWidget,
 )
 
@@ -33,6 +41,7 @@ from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.results import SimulationResult
 
 from .component_items import BatteryItem, ComponentItem, DropTargetItem, GuideItem
+from .icons import icon
 from .routing import (
     normalized_octilinear_polyline,
     octilinear_route,
@@ -40,6 +49,7 @@ from .routing import (
     project_to_polyline,
     split_polyline,
 )
+from .theme import DANGER, INFO_TEXT, KIND_NAMES, WARNING_TEXT
 from .wire_items import JunctionItem, RouteHandleItem, TerminalItem, WireItem
 
 DEFAULT_VALUES = {
@@ -71,6 +81,7 @@ class CircuitScene(QGraphicsScene):
         self._wire_preview: QGraphicsLineItem | None = None
         self._suppress_selection_signal = False
         self.highlighted_components: set[str] = set()
+        self.problem_components: set[str] = set()
         self.setSceneRect(QRectF(0, 0, 1200, 620))
         self.selectionChanged.connect(self._selection_updated)
         self.rebuild()
@@ -97,6 +108,7 @@ class CircuitScene(QGraphicsScene):
             else:
                 self._rebuild_legacy()
             self._apply_highlight()
+            self._apply_problems()
         finally:
             self._suppress_selection_signal = False
         self._selection_updated()
@@ -544,6 +556,22 @@ class CircuitScene(QGraphicsScene):
         if self.battery_item is not None:
             self.battery_item.set_highlighted(self.circuit.source.id in self.highlighted_components)
 
+    def set_problem_components(self, component_ids: tuple[str, ...] | set[str]) -> None:
+        """Outline the components that stop the circuit from being solved."""
+        self.problem_components = set(component_ids)
+        self._apply_problems()
+
+    def _apply_problems(self) -> None:
+        for component_id, item in self.component_items.items():
+            item.set_problem(component_id in self.problem_components)
+
+    def clear_results(self) -> None:
+        """Forget readings from an older circuit so nothing stale is shown."""
+        for item in self.component_items.values():
+            item.clear_measurement()
+        for wire in self.wire_items.values():
+            wire.set_stale(True)
+
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         item = self.itemAt(event.scenePos(), QTransform())
         endpoint = self._endpoint_for_item(item)
@@ -646,6 +674,7 @@ class CircuitScene(QGraphicsScene):
         finally:
             self._suppress_selection_signal = False
         self.highlighted_components = set()
+        self.problem_components = set()
         self.circuit = circuit
         self.command_stack = CircuitCommandStack(circuit)
         self.rebuild()
@@ -663,12 +692,179 @@ class CircuitView(QGraphicsView):
     MAX_ZOOM = 4.0
     FIT_MARGIN = 48.0
 
+    #: Right-click "Edit value" and "Add parallel copy" on a component.
+    edit_requested = Signal(str)
+    parallel_requested = Signal(str)
+
     def __init__(self, scene: CircuitScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
         self.setAcceptDrops(True)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        # Scrolling and dragging still pan; the bars themselves are only clutter here.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._build_overlays()
+
+    # ----- Overlays: problem banner and zoom buttons ---------------------------------
+
+    def _build_overlays(self) -> None:
+        self.banner = QFrame(self)
+        self.banner.setObjectName("banner")
+        banner_layout = QHBoxLayout(self.banner)
+        banner_layout.setContentsMargins(12, 8, 12, 8)
+        self.banner_label = QLabel()
+        self.banner_label.setWordWrap(True)
+        banner_layout.addWidget(self.banner_label)
+        self.banner.hide()
+
+        self.controls = QFrame(self)
+        self.controls.setObjectName("canvasControls")
+        controls_layout = QHBoxLayout(self.controls)
+        controls_layout.setContentsMargins(3, 3, 3, 3)
+        controls_layout.setSpacing(2)
+        self.zoom_buttons: dict[str, QToolButton] = {}
+        for name, tip, slot in (
+            ("zoom-out", "Zoom out (⌘/Ctrl −)", self.zoom_out),
+            ("zoom-in", "Zoom in (⌘/Ctrl +)", self.zoom_in),
+            ("fit", "Show the whole circuit (⌘/Ctrl 0)", self.fit_circuit),
+        ):
+            button = QToolButton()
+            button.setIcon(icon(name))
+            button.setIconSize(QSize(18, 18))
+            button.setToolTip(tip)
+            button.clicked.connect(slot)
+            controls_layout.addWidget(button)
+            self.zoom_buttons[name] = button
+        self._place_overlays()
+
+    def show_banner(self, kind: str, text: str) -> None:
+        """Show a message above the circuit; ``kind`` is "problem" or "info"."""
+        color = WARNING_TEXT if kind == "problem" else INFO_TEXT
+        mark = "⚠" if kind == "problem" else "ℹ"
+        self.banner.setProperty("kind", kind)
+        self.banner.style().unpolish(self.banner)
+        self.banner.style().polish(self.banner)
+        self.banner_label.setText(f"<span style='color:{color}'><b>{mark}</b>&nbsp; {text}</span>")
+        self.banner.show()
+        self._place_overlays()
+
+    def hide_banner(self) -> None:
+        self.banner.hide()
+
+    def _place_overlays(self) -> None:
+        width = min(620, max(200, self.width() - 40))
+        layout = self.banner.layout()
+        height = (
+            layout.heightForWidth(width)
+            if layout is not None and layout.hasHeightForWidth()
+            else self.banner.sizeHint().height()
+        )
+        self.banner.setFixedSize(width, height)
+        self.banner.move((self.width() - width) // 2, 12)
+        self.controls.adjustSize()
+        self.controls.move(
+            self.width() - self.controls.width() - 12,
+            self.height() - self.controls.height() - 12,
+        )
+        self.banner.raise_()
+        self.controls.raise_()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._place_overlays()
+
+    def reveal(self, component_ids: set[str] | tuple[str, ...]) -> None:
+        """Scroll so the given components are on screen."""
+        scene = self.scene()
+        if not isinstance(scene, CircuitScene):
+            return
+        items = [scene.component_items[i] for i in component_ids if i in scene.component_items]
+        if not items:
+            return
+        bounds = items[0].sceneBoundingRect()
+        for item in items[1:]:
+            bounds = bounds.united(item.sceneBoundingRect())
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        if not visible.contains(bounds):
+            # Show the whole circuit so the problem is seen in context.
+            self.fit_circuit()
+
+    # ----- Right-click menus ----------------------------------------------------------
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        menu = self.build_context_menu(event.pos())
+        if menu is not None:
+            menu.exec(event.globalPos())
+            event.accept()
+
+    def build_context_menu(self, view_pos: QPoint) -> QMenu | None:
+        """The menu for whatever is under ``view_pos`` (kept separate so tests can inspect it)."""
+        scene = self.scene()
+        if not isinstance(scene, CircuitScene):
+            return None
+        scene_pos = self.mapToScene(view_pos)
+        item: QGraphicsItem | None = scene.itemAt(scene_pos, self.transform())
+        while item is not None and not isinstance(
+            item, (ComponentItem, BatteryItem, WireItem, JunctionItem, RouteHandleItem)
+        ):
+            item = item.parentItem()
+        menu = QMenu(self)
+        if isinstance(item, ComponentItem):
+            component_id = item.component.id
+            scene.select_only(component_id)
+            menu.addAction(
+                icon("edit"), "Edit value…", lambda: self.edit_requested.emit(component_id)
+            )
+            menu.addAction(icon("rotate"), "Rotate", lambda: scene.rotate_component(component_id))
+            menu.addAction(
+                icon("parallel"),
+                "Add parallel copy",
+                lambda: self.parallel_requested.emit(component_id),
+            )
+            menu.addSeparator()
+            menu.addAction(icon("trash", DANGER), "Delete", scene.delete_selected)
+        elif isinstance(item, BatteryItem):
+            menu.addAction(icon("edit"), "Change voltage…", scene.source_activated.emit)
+        elif isinstance(item, WireItem):
+            wire_item = item
+            menu.addAction(
+                "Add a bend here", lambda: scene.add_route_handle_at(wire_item.wire.id, scene_pos)
+            )
+            menu.addSeparator()
+            menu.addAction(
+                icon("trash", DANGER), "Delete wire", lambda: self._delete_only(wire_item)
+            )
+        elif isinstance(item, JunctionItem):
+            junction = item
+            menu.addAction(
+                icon("trash", DANGER),
+                "Delete junction and its wires",
+                lambda: self._delete_only(junction),
+            )
+        elif isinstance(item, RouteHandleItem):
+            handle = item
+            menu.addAction(icon("trash", DANGER), "Remove bend", lambda: self._delete_only(handle))
+        else:
+            for kind in ("resistor", "capacitor", "inductor"):
+                menu.addAction(
+                    f"Add {KIND_NAMES[kind].lower()} here",
+                    lambda chosen=kind: scene.place_component(chosen, scene_pos),
+                )
+            menu.addSeparator()
+            menu.addAction(icon("fit"), "Show the whole circuit", self.fit_circuit)
+        return menu
+
+    @staticmethod
+    def _delete_only(item: QGraphicsItem) -> None:
+        scene = item.scene()
+        if not isinstance(scene, CircuitScene):
+            return
+        scene.clearSelection()
+        item.setSelected(True)
+        scene.delete_selected()
 
     @property
     def zoom_level(self) -> float:
@@ -707,6 +903,12 @@ class CircuitView(QGraphicsView):
         bounds = bounds.adjusted(-margin, -margin, margin, margin)
         self.resetTransform()
         self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+        if not self.banner.isHidden():
+            # Leave room for the problem banner so it never covers the circuit.
+            reserve = (self.banner.height() + 16) / max(self.zoom_level, 1e-6)
+            bounds = bounds.adjusted(0, -reserve, 0, 0)
+            self.resetTransform()
+            self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
         fitted = self.zoom_level
         clamped = min(1.0, max(self.MIN_ZOOM, fitted))
         if not math.isclose(clamped, fitted, rel_tol=1e-9):
