@@ -17,8 +17,21 @@ from PySide6.QtWidgets import (
 
 from circuitcanvas.solver.equations import EquationLine, EquationReport
 
+_LAW_NAMES = {"R": "Ohm's law", "C": "capacitor law", "L": "inductor law"}
+
+
+def line_name(line: EquationLine, position: int) -> str:
+    """A readable name such as "Junction 2", "Loop 1", or "R1: Ohm's law"."""
+    if line.kind == "kcl":
+        return f"Junction {position}"
+    if line.kind == "kvl":
+        return f"Loop {position}"
+    component_id = line.id.removeprefix("LAW-")
+    return f"{component_id}: {_LAW_NAMES.get(component_id[:1], 'component law')}"
+
 
 class EquationPanel(QWidget):
+    # Emits the EquationLine to highlight, or None when nothing should be highlighted.
     equation_selected = Signal(object)
 
     def __init__(self) -> None:
@@ -26,18 +39,31 @@ class EquationPanel(QWidget):
         self._report: EquationReport | None = None
         self._lines: dict[str, EquationLine] = {}
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
 
-        heading = QLabel("KIRCHHOFF EQUATIONS")
-        heading.setStyleSheet("font-size:11px;font-weight:700;color:#64748b;letter-spacing:1px")
-        layout.addWidget(heading)
+        caption = QLabel(
+            "Kirchhoff's laws for this circuit, with the solved numbers filled in. "
+            "Currents into every junction add up to zero, and voltages around every loop "
+            "add up to zero. ✓ means the numbers balance. Click a line to outline its "
+            "parts on the canvas."
+        )
+        caption.setWordWrap(True)
+        caption.setObjectName("hint")
+        layout.addWidget(caption)
         toggle = QHBoxLayout()
-        self.ordinary_button = QPushButton("Ordinary")
-        self.differential_button = QPushButton("Differential")
+        self.ordinary_button = QPushButton("With numbers")
+        self.differential_button = QPushButton("Matrix form")
         for button in (self.ordinary_button, self.differential_button):
             button.setCheckable(True)
             toggle.addWidget(button)
         self.ordinary_button.setChecked(True)
+        self.ordinary_button.setToolTip(
+            "Each equation with the solved values substituted, at the time shown on the graph"
+        )
+        self.differential_button.setToolTip(
+            "The whole circuit as one matrix differential equation, C·x′ + G·x = b"
+        )
         self.mode_group = QButtonGroup(self)
         self.mode_group.setExclusive(True)
         self.mode_group.addButton(self.ordinary_button)
@@ -46,11 +72,11 @@ class EquationPanel(QWidget):
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        self.tree.setMinimumHeight(180)
+        self.tree.setMinimumHeight(140)
         layout.addWidget(self.tree)
         self.detail = QPlainTextEdit()
         self.detail.setReadOnly(True)
-        self.detail.setMinimumHeight(180)
+        self.detail.setMinimumHeight(110)
         self.detail.setStyleSheet("font-family:Menlo,monospace;font-size:11px")
         layout.addWidget(self.detail)
 
@@ -69,16 +95,18 @@ class EquationPanel(QWidget):
         self._lines = {line.id: line for line in (*report.kcl, *report.kvl, *report.laws)}
         self.tree.clear()
         for title, lines in (
-            ("KCL nodes", report.kcl),
-            ("KVL loops", report.kvl),
-            ("Element laws", report.laws),
+            ("Junctions: current law (KCL)", report.kcl),
+            ("Loops: voltage law (KVL)", report.kvl),
+            ("Each component's own law", report.laws),
         ):
             parent = QTreeWidgetItem([title])
             self.tree.addTopLevelItem(parent)
-            for line in lines:
+            for position, line in enumerate(lines, start=1):
+                name = line_name(line, position)
                 child = QTreeWidgetItem(
-                    [f"✓ {line.id}" if abs(line.residual) <= 1e-9 else f"⚠ {line.id}"]
+                    [f"✓ {name}" if abs(line.residual) <= 1e-9 else f"⚠ {name}"]
                 )
+                child.setToolTip(0, line.symbolic)
                 child.setData(0, Qt.ItemDataRole.UserRole, line.id)
                 child.setForeground(
                     0,
@@ -98,6 +126,16 @@ class EquationPanel(QWidget):
         self._lines = {}
         self.tree.clear()
         self.detail.clear()
+        self.equation_selected.emit(None)
+
+    def current_line(self) -> EquationLine | None:
+        """The equation whose elements should be highlighted on the canvas, if any."""
+        if not self.ordinary_button.isChecked():
+            return None
+        current = self.tree.currentItem()
+        if current is None:
+            return None
+        return self._lines.get(str(current.data(0, Qt.ItemDataRole.UserRole)))
 
     def visible_text(self) -> str:
         return self.detail.toPlainText()
@@ -137,6 +175,7 @@ class EquationPanel(QWidget):
             self._tree_selection_changed(current, None)
 
     def _show_differential(self) -> None:
+        self.equation_selected.emit(None)
         if self._report is None:
             self.detail.clear()
             return

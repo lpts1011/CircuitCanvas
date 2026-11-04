@@ -38,5 +38,5 @@ def test_snapshot_is_detached_from_later_circuit_changes() -> None:
     circuit.remove_component("R1")
 
     assert snapshot.components[0].id == "R1"
-    assert snapshot.settings == SimulationSettings()
+    assert snapshot.settings == SimulationSettings(auto_duration=True)
     assert circuit.components == {}

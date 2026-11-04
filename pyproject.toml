@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "circuitcanvas"
-version = "0.3.1"
+dynamic = ["version"]
 description = "Interactive RLC circuit builder and transient simulator"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,14 +24,23 @@ dev = [
   "pyinstaller>=6.11",
   "pytest>=8.3",
   "pytest-qt>=4.4",
-  "ruff>=0.8",
+  # Pinned to one minor version: new ruff releases add rules and format changes.
+  "ruff>=0.17,<0.18",
 ]
 
 [project.scripts]
 circuitcanvas = "circuitcanvas.app:main"
 
+[tool.setuptools.dynamic]
+# The single place to change the version is src/circuitcanvas/__init__.py.
+version = {attr = "circuitcanvas.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"circuitcanvas.examples" = ["*.json"]
+"circuitcanvas.resources" = ["*.png"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
@@ -41,6 +50,8 @@ qt_api = "pyside6"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Historical design notes; their code snippets are not maintained as source.
+extend-exclude = ["docs/superpowers"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

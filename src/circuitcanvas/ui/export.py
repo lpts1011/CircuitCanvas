@@ -32,6 +32,26 @@ def export_branch_csv(path: str | Path, result: SimulationResult, component_id: 
         )
 
 
+def export_all_branches_csv(path: str | Path, result: SimulationResult) -> None:
+    """Write one wide table: time, the battery's current and power, then every component."""
+    component_ids = sorted(result.branches)
+    header = ["time_s", "source_current_a", "source_power_w"]
+    columns = [result.time, result.source_current, result.source_power]
+    for component_id in component_ids:
+        branch = result.branches[component_id]
+        header += [
+            f"{component_id}_voltage_v",
+            f"{component_id}_current_a",
+            f"{component_id}_power_w",
+            f"{component_id}_energy_j",
+        ]
+        columns += [branch.voltage, branch.current, branch.power, branch.energy]
+    with Path(path).open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        writer.writerows(zip(*columns, strict=True))
+
+
 def export_scene_png(
     path: str | Path,
     scene: QGraphicsScene,

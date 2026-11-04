@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsObject,
+    QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
     QStyleOptionGraphicsItem,
     QWidget,
@@ -17,27 +18,80 @@ from circuitcanvas.domain.wiring import EndpointRef, Wire
 
 from .routing import normalized_octilinear_polyline
 
+TARGET_GREEN = "#16a34a"
+
+
+def _paint_dot_halo(painter: QPainter, *, targeted: bool, candidate: bool) -> None:
+    """The ring around a dot while a wire is being drawn."""
+    if targeted:
+        halo = QColor(TARGET_GREEN)
+        halo.setAlpha(70)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(halo)
+        painter.drawEllipse(QPointF(0, 0), 15, 15)
+    elif candidate:
+        painter.setPen(QPen(QColor(TARGET_GREEN), 1.5, Qt.PenStyle.DotLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(0, 0), 12, 12)
+
 
 class TerminalItem(QGraphicsObject):
+    """A component or battery terminal: where wires start and end."""
+
     def __init__(self, ref: EndpointRef, parent: QGraphicsObject) -> None:
         super().__init__(parent)
         self.ref = ref
         self.connected = False
+        #: The wire being drawn will end here if released now.
         self.targeted = False
+        #: A wire is being drawn and could end here.
+        self.candidate = False
+        self.hovered = False
+        self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setZValue(5)
+        self.setToolTip(
+            "Drag from this dot to another dot or onto a wire to connect them.\n"
+            "Orange = not connected yet, blue = connected."
+        )
 
     def boundingRect(self) -> QRectF:
-        return QRectF(-8, -8, 16, 16)
+        return QRectF(-16, -16, 32, 32)
+
+    def shape(self) -> QPainterPath:
+        # A grab area a little larger than the dot, so it is easy to hit.
+        path = QPainterPath()
+        path.addEllipse(QPointF(0, 0), 11, 11)
+        return path
+
+    def set_wire_state(self, *, candidate: bool, targeted: bool) -> None:
+        if (candidate, targeted) != (self.candidate, self.targeted):
+            self.candidate = candidate
+            self.targeted = targeted
+            self.update()
+
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self.hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self.hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
 
     def paint(
         self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None
     ) -> None:
         del option, widget
-        color = "#22c55e" if self.targeted else ("#2563eb" if self.connected else "#f97316")
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        _paint_dot_halo(painter, targeted=self.targeted, candidate=self.candidate)
+        idle = "#2563eb" if self.connected else "#f97316"
+        color = TARGET_GREEN if self.targeted else idle
+        radius = 10.0 if self.targeted or self.hovered else 8.0
         painter.setPen(QPen(QColor("#ffffff"), 2))
         painter.setBrush(QColor(color))
-        painter.drawEllipse(self.boundingRect())
+        painter.drawEllipse(QPointF(0, 0), radius, radius)
 
 
 class JunctionItem(QGraphicsObject):
@@ -52,17 +106,40 @@ class JunctionItem(QGraphicsObject):
         )
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setZValue(4)
+        self.targeted = False
+        self.candidate = False
+        self.setToolTip(
+            "Junction: wires that meet here are connected.\n"
+            "Drag to slide it along its wire · Shift-drag to draw a new wire · "
+            "Delete to remove"
+        )
 
     def boundingRect(self) -> QRectF:
-        return QRectF(-7, -7, 14, 14)
+        return QRectF(-16, -16, 32, 32)
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addEllipse(QPointF(0, 0), 10, 10)
+        return path
+
+    def set_wire_state(self, *, candidate: bool, targeted: bool) -> None:
+        if (candidate, targeted) != (self.candidate, self.targeted):
+            self.candidate = candidate
+            self.targeted = targeted
+            self.update()
 
     def paint(
         self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None
     ) -> None:
         del option, widget
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        _paint_dot_halo(painter, targeted=self.targeted, candidate=self.candidate)
+        idle = "#2563eb" if self.isSelected() else "#334155"
+        color = TARGET_GREEN if self.targeted else idle
         painter.setPen(QPen(QColor("#ffffff"), 2))
-        painter.setBrush(QColor("#2563eb" if self.isSelected() else "#334155"))
-        painter.drawEllipse(self.boundingRect())
+        painter.setBrush(QColor(color))
+        radius = 9.0 if self.targeted else 7.0
+        painter.drawEllipse(QPointF(0, 0), radius, radius)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         super().mouseReleaseEvent(event)
@@ -83,6 +160,7 @@ class RouteHandleItem(QGraphicsObject):
         )
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setZValue(6)
+        self.setToolTip("Bend: drag to reshape the wire · Delete to remove")
 
     def boundingRect(self) -> QRectF:
         return QRectF(-6, -6, 12, 12)
@@ -110,6 +188,8 @@ class WireItem(QGraphicsObject):
         self.current = 0.0
         self.phase = 0.0
         self.stale = True
+        #: Glows while a dragged component would be inserted here.
+        self.drop_target = False
         raw_points = (
             (start.x(), start.y()),
             *wire.route,
@@ -121,6 +201,11 @@ class WireItem(QGraphicsObject):
         self.setFlag(QGraphicsObject.GraphicsItemFlag.ItemIsSelectable)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setZValue(-1)
+        self.setToolTip(
+            "Wire (no resistance). Drop a component here to insert it in series.\n"
+            "Double-click to add a bend · drop a new wire here to make a junction · "
+            "Delete to remove"
+        )
 
     def _path_from_points(self) -> QPainterPath:
         path = QPainterPath(self._points[0])
@@ -151,6 +236,11 @@ class WireItem(QGraphicsObject):
         self.stale = False
         self.update()
 
+    def set_drop_target(self, target: bool) -> None:
+        if target != self.drop_target:
+            self.drop_target = target
+            self.update()
+
     def set_stale(self, stale: bool) -> None:
         self.stale = stale
         self.update()
@@ -173,9 +263,22 @@ class WireItem(QGraphicsObject):
     ) -> None:
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.drop_target:
+            glow = QColor("#2563eb")
+            glow.setAlpha(70)
+            painter.setPen(
+                QPen(
+                    glow,
+                    16,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            painter.drawPath(self._path)
         painter.setPen(
             QPen(
-                QColor("#2563eb" if self.isSelected() else "#334155"),
+                QColor("#2563eb" if self.isSelected() or self.drop_target else "#334155"),
                 4,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,

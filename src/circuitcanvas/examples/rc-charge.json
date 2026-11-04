@@ -1,0 +1,140 @@
+{
+  "components": [
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "node_a": "loose_R1_a",
+      "node_b": "loose_R1_b",
+      "rotation": 0,
+      "value": 1000.0
+    },
+    {
+      "id": "C1",
+      "kind": "capacitor",
+      "node_a": "loose_C1_a",
+      "node_b": "loose_C1_b",
+      "rotation": 0,
+      "value": 1e-05
+    }
+  ],
+  "junctions": [
+    {
+      "id": "J1",
+      "position": [
+        980.0,
+        290.0
+      ]
+    },
+    {
+      "id": "J2",
+      "position": [
+        980.0,
+        430.0
+      ]
+    }
+  ],
+  "nodes": [
+    "loose_C1_a",
+    "loose_C1_b",
+    "loose_R1_a",
+    "loose_R1_b",
+    "n_neg",
+    "n_pos"
+  ],
+  "open_edge": null,
+  "positions": {
+    "C1": [
+      545.0,
+      430.0
+    ],
+    "R1": [
+      545.0,
+      290.0
+    ]
+  },
+  "rotations": {
+    "C1": 0,
+    "R1": 0
+  },
+  "schema_version": 2,
+  "settings": {
+    "auto_duration": true,
+    "duration": 0.1,
+    "method": "trapezoidal",
+    "samples": 1000
+  },
+  "source": {
+    "id": "V1",
+    "node_a": "n_pos",
+    "node_b": "n_neg",
+    "voltage": 5.0
+  },
+  "wires": [
+    {
+      "end": {
+        "id": "J2",
+        "type": "junction"
+      },
+      "id": "W2",
+      "route": [],
+      "start": {
+        "id": "J1",
+        "type": "junction"
+      }
+    },
+    {
+      "end": {
+        "owner": "R1",
+        "terminal": "a",
+        "type": "terminal"
+      },
+      "id": "W4",
+      "route": [],
+      "start": {
+        "owner": "V1",
+        "terminal": "a",
+        "type": "terminal"
+      }
+    },
+    {
+      "end": {
+        "id": "J1",
+        "type": "junction"
+      },
+      "id": "W5",
+      "route": [],
+      "start": {
+        "owner": "R1",
+        "terminal": "b",
+        "type": "terminal"
+      }
+    },
+    {
+      "end": {
+        "owner": "C1",
+        "terminal": "a",
+        "type": "terminal"
+      },
+      "id": "W6",
+      "route": [],
+      "start": {
+        "id": "J2",
+        "type": "junction"
+      }
+    },
+    {
+      "end": {
+        "owner": "V1",
+        "terminal": "b",
+        "type": "terminal"
+      },
+      "id": "W7",
+      "route": [],
+      "start": {
+        "owner": "C1",
+        "terminal": "b",
+        "type": "terminal"
+      }
+    }
+  ]
+}

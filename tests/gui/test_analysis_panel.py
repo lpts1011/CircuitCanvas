@@ -29,22 +29,39 @@ def test_plot_and_table_use_the_same_samples(qtbot) -> None:
     )
 
 
-def test_time_slider_emits_selected_index(qtbot) -> None:
+def test_dragging_the_time_cursor_emits_the_nearest_sample(qtbot) -> None:
     panel = AnalysisPanel()
     qtbot.addWidget(panel)
     time = np.linspace(0.0, 0.01, 5)
     zeros = np.zeros(5)
     panel.set_branch("R1", time, BranchResult(zeros, zeros, zeros, zeros))
 
-    with qtbot.waitSignal(panel.time_index_changed) as signal:
-        panel.time_slider.setValue(2)
+    with qtbot.waitSignal(panel.cursor_index_changed) as signal:
+        panel.cursors[0].setValue(0.0049)
 
     assert signal.args == [2]
+    assert panel.cursors[1].value() == time[2]
 
 
-def test_current_curve_uses_independent_right_axis(qtbot) -> None:
+def test_voltage_and_current_have_their_own_plots_on_one_time_axis(qtbot) -> None:
     panel = AnalysisPanel()
     qtbot.addWidget(panel)
 
-    assert panel.plot.getPlotItem().getAxis("right").isVisible()
-    assert panel.current_curve in panel.current_view.addedItems
+    assert panel.voltage_curve in panel.voltage_plot.items
+    assert panel.current_curve in panel.current_plot.items
+    linked = panel.current_plot.getViewBox().linkedView(panel.current_plot.getViewBox().XAxis)
+    assert linked is panel.voltage_plot.getViewBox()
+
+
+def test_placeholder_replaces_stale_graphs(qtbot) -> None:
+    panel = AnalysisPanel()
+    qtbot.addWidget(panel)
+    time = np.linspace(0.0, 0.01, 5)
+    ones = np.ones(5)
+    panel.set_branch("R1", time, BranchResult(ones, ones, ones, ones))
+    assert not panel.showing_placeholder
+
+    panel.show_placeholder("Graphs appear here once the circuit is complete.")
+
+    assert panel.showing_placeholder
+    assert panel.voltage_curve.getData()[0] is None or len(panel.voltage_curve.getData()[0]) == 0
