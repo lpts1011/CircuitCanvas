@@ -13,6 +13,9 @@ class SimulationSettings:
     duration: float = 0.1
     samples: int = 1000
     method: str = "trapezoidal"
+    #: When True the solver picks the span from the circuit's time constants and
+    #: ``duration`` is only used for circuits without any (purely resistive ones).
+    auto_duration: bool = False
 
     def __post_init__(self) -> None:
         if self.duration <= 0:
@@ -41,7 +44,9 @@ class Circuit:
     source: VoltageSource
     components: dict[str, Component] = field(default_factory=dict)
     nodes: set[str] = field(default_factory=lambda: {"n_pos", "n_neg"})
-    settings: SimulationSettings = field(default_factory=SimulationSettings)
+    settings: SimulationSettings = field(
+        default_factory=lambda: SimulationSettings(auto_duration=True)
+    )
     positions: dict[str, tuple[float, float]] = field(default_factory=dict)
     rotations: dict[str, int] = field(default_factory=dict)
     junctions: dict[str, Junction] = field(default_factory=dict)

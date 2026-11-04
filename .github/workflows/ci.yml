@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  # Lets the release workflow run the same checks before building apps.
+  workflow_call:
 
 jobs:
   verify:
