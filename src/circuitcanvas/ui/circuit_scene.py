@@ -39,6 +39,8 @@ from PySide6.QtWidgets import (
 from circuitcanvas.commands.circuit_commands import CircuitCommandStack
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.components import ComponentKind
+from circuitcanvas.domain.layout import component_rotation, terminal_offset
+from circuitcanvas.domain.netlist import derive_connectivity
 from circuitcanvas.domain.wiring import EndpointRef, JunctionRef, TerminalRef
 from circuitcanvas.solver.equations import EquationLine
 from circuitcanvas.solver.results import SimulationResult
@@ -234,6 +236,8 @@ class CircuitScene(QGraphicsScene):
         }
         for terminal in self._terminal_items():
             terminal.connected = terminal.ref in connected
+        for junction_id, junction_item in self.junction_items.items():
+            junction_item.set_dangling(len(self._wires_touching(JunctionRef(junction_id))) <= 1)
 
         for wire in self.circuit.wires.values():
             wire_item = WireItem(
@@ -464,10 +468,93 @@ class CircuitScene(QGraphicsScene):
         before, after = split_polyline(polyline, (position.x(), position.y()))
         start = before[-2]
         end = after[1]
-        vertical = abs(end[0] - start[0]) < 1.0 and abs(end[1] - start[1]) >= 1.0
-        return before[-1], 90 if vertical else 0, before[1:-1], after[1:-1]
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        # Terminal "a" faces the start of the wire, so each new wire runs straight
+        # from its end to the component instead of doubling back underneath it.
+        if abs(dx) < 1.0 and abs(dy) >= 1.0:
+            rotation = 90 if dy > 0 else 270
+        else:
+            rotation = 0 if dx >= 0 else 180
+        return before[-1], rotation, before[1:-1], after[1:-1]
 
-    def best_wire_insertion(self) -> tuple[str, QPointF]:
+    # ----- Finding room for a new component ------------------------------------------
+    #
+    #: Length of a component card along its wire, terminal to terminal.
+    CARD_LENGTH = 168.0
+    #: Half the card's size across the wire: lying flat, and standing upright.
+    CARD_HALF_ACROSS = (49.0, 66.0)
+    #: Bare wire kept visible between a new component and its neighbours or a corner.
+    LEAD = 30.0
+
+    def _card_rects(self, *, exclude: str | None = None) -> list[QRectF]:
+        """The space taken by every component card and the battery."""
+        rects = [
+            item.sceneBoundingRect()
+            for component_id, item in self.component_items.items()
+            if component_id != exclude
+        ]
+        if self.battery_item is not None:
+            rects.append(self.battery_item.sceneBoundingRect())
+        return rects
+
+    def _free_stretches(self) -> list[tuple[float, bool, str, QPointF]]:
+        """Every clear straight run of wire: (length, is horizontal, wire, midpoint).
+
+        A run is clear when a component placed anywhere on it would not touch
+        another component, the battery, or a corner of the wire.
+        """
+        rects = self._card_rects()
+        stretches: list[tuple[float, bool, str, QPointF]] = []
+        for wire_id, item in self.wire_items.items():
+            points = item.polyline_points()
+            for start, end in zip(points, points[1:], strict=False):
+                horizontal = abs(start.y() - end.y()) < 0.5
+                vertical = abs(start.x() - end.x()) < 0.5
+                if horizontal == vertical:
+                    continue  # A diagonal (or zero-length) piece: components go on straight runs.
+                if horizontal:
+                    low, high = sorted((start.x(), end.x()))
+                    level, half = start.y(), self.CARD_HALF_ACROSS[0]
+                    blocked = [
+                        (rect.left() - self.LEAD, rect.right() + self.LEAD)
+                        for rect in rects
+                        if rect.top() - half < level < rect.bottom() + half
+                    ]
+                else:
+                    low, high = sorted((start.y(), end.y()))
+                    level, half = start.x(), self.CARD_HALF_ACROSS[1]
+                    blocked = [
+                        (rect.top() - self.LEAD, rect.bottom() + self.LEAD)
+                        for rect in rects
+                        if rect.left() - half < level < rect.right() + half
+                    ]
+                cursor = low + self.LEAD
+                limit = high - self.LEAD
+                for block_low, block_high in sorted(blocked):
+                    if block_low > cursor:
+                        self._add_stretch(
+                            stretches, wire_id, horizontal, level, cursor, min(block_low, limit)
+                        )
+                    cursor = max(cursor, block_high)
+                self._add_stretch(stretches, wire_id, horizontal, level, cursor, limit)
+        return stretches
+
+    @staticmethod
+    def _add_stretch(
+        stretches: list[tuple[float, bool, str, QPointF]],
+        wire_id: str,
+        horizontal: bool,
+        level: float,
+        low: float,
+        high: float,
+    ) -> None:
+        if high <= low:
+            return
+        middle = (low + high) / 2.0
+        point = QPointF(middle, level) if horizontal else QPointF(level, middle)
+        stretches.append((high - low, horizontal, wire_id, point))
+
+    def _longest_wire_piece(self) -> tuple[str, QPointF]:
         candidates: list[tuple[float, str, QPointF]] = []
         for wire_id, item in self.wire_items.items():
             for start, end in zip(item.polyline_points(), item.polyline_points()[1:], strict=False):
@@ -479,8 +566,56 @@ class CircuitScene(QGraphicsScene):
         _, wire_id, midpoint = max(candidates, key=lambda candidate: candidate[0])
         return wire_id, midpoint
 
+    def best_wire_insertion(self) -> tuple[str, QPointF]:
+        """Where a clicked component goes: the middle of the longest clear run of wire.
+
+        When nothing is clear (a crowded circuit) this falls back to the middle of
+        the longest piece of wire; :meth:`add_component_in_series` makes room first.
+        """
+        fitting = [
+            stretch for stretch in self._free_stretches() if stretch[0] >= self.CARD_LENGTH - 1e-6
+        ]
+        if fitting:
+            # The longest run; a flat one wins a tie because it reads more easily.
+            _, _, wire_id, point = max(fitting, key=lambda stretch: (stretch[0], stretch[1]))
+            return wire_id, point
+        return self._longest_wire_piece()
+
+    def _make_room(self, merge_key: tuple[str, int]) -> bool:
+        """Widen the circuit so one more component fits on a horizontal wire."""
+        flat = [stretch for stretch in self._free_stretches() if stretch[1]]
+        if not flat or self.battery_item is None:
+            return False
+        length, _, _, point = max(flat, key=lambda stretch: stretch[0])
+        missing = self.CARD_LENGTH - length + 1.0
+        if missing <= 0:
+            return False
+        # The battery never moves, so the side away from it slides outwards.
+        distance = missing if point.x() > self.battery_item.scenePos().x() else -missing
+        self.command_stack.shift_layout(point.x(), distance, merge_key=merge_key)
+        self.rebuild()
+        return True
+
+    def add_component_in_series(self, kind: ComponentKind | str) -> str:
+        """Add a component with one click: on a clear run of wire, never on top of another.
+
+        A crowded circuit is widened first; that and the new component undo together.
+        """
+        self._wire_gesture += 1
+        merge_key = ("add", self._wire_gesture)
+        has_room = any(stretch[0] >= self.CARD_LENGTH - 1e-6 for stretch in self._free_stretches())
+        if not has_room:
+            self._make_room(merge_key)
+        wire_id, position = self.best_wire_insertion()
+        return self.insert_component_on_wire(kind, wire_id, position, merge_key=merge_key)
+
     def insert_component_on_wire(
-        self, kind: ComponentKind | str, wire_id: str, position: QPointF
+        self,
+        kind: ComponentKind | str,
+        wire_id: str,
+        position: QPointF,
+        *,
+        merge_key: tuple[str, int] | None = None,
     ) -> str:
         component_kind = kind if isinstance(kind, ComponentKind) else ComponentKind(kind)
         center, rotation, before, after = self._wire_split(wire_id, position)
@@ -492,45 +627,125 @@ class CircuitScene(QGraphicsScene):
             rotation,
             before,
             after,
+            merge_key=merge_key,
         )
         self.rebuild()
         self.select_only(component_id)
         self.circuit_changed.emit(self.circuit.revision)
         return component_id
 
-    @staticmethod
-    def _component_terminal_positions(
-        position: tuple[float, float], rotation: int
-    ) -> tuple[tuple[float, float], tuple[float, float]]:
+    #: How far apart stacked parallel components sit: flat ones, and upright ones.
+    PARALLEL_STEP = (140.0, 190.0)
+
+    def _terminal_point(
+        self, position: tuple[float, float], rotation: int, terminal: str
+    ) -> tuple[float, float]:
+        dx, dy = terminal_offset(rotation, terminal)
+        return (position[0] + dx, position[1] + dy)
+
+    def _card_rect_at(self, position: tuple[float, float], rotation: int) -> QRectF:
+        """The space a component card would take at ``position``."""
         if rotation % 180 == 90:
-            return (
-                (position[0], position[1] - 84.0),
-                (position[0], position[1] + 84.0),
+            return QRectF(position[0] - 66.0, position[1] - 84.0, 132.0, 168.0)
+        return QRectF(position[0] - 84.0, position[1] - 49.0, 168.0, 98.0)
+
+    def _spot_is_clear(
+        self,
+        anchor_id: str,
+        position: tuple[float, float],
+        rotation: int,
+    ) -> bool:
+        """Would a parallel copy at ``position`` sit on empty canvas, leads included?"""
+        card = self._card_rect_at(position, rotation).adjusted(-10, -10, 10, 10)
+        if any(card.intersects(rect) for rect in self._card_rects()):
+            return False
+        # A card lying on a wire would look as if it were part of that wire.
+        for item in self.wire_items.values():
+            points = item.polyline_points()
+            for start, end in zip(points, points[1:], strict=False):
+                span = QRectF(start, end).normalized().adjusted(-1, -1, 1, 1)
+                if card.intersects(span):
+                    return False
+        # The two leads run straight from the neighbour's ends; nothing may be in the way.
+        anchor_position = self.circuit.positions[anchor_id]
+        others = self._card_rects(exclude=anchor_id)
+        for terminal in ("a", "b"):
+            start_point = self._terminal_point(anchor_position, rotation, terminal)
+            end_point = self._terminal_point(position, rotation, terminal)
+            lead = QRectF(QPointF(*start_point), QPointF(*end_point)).normalized()
+            lead = lead.adjusted(-2, -2, 2, 2)
+            if any(lead.intersects(rect) for rect in others):
+                return False
+        return True
+
+    def _parallel_stack(self, component_id: str) -> list[str]:
+        """This component and any parallel partners already lined up beside it."""
+        connectivity = derive_connectivity(self.circuit)
+
+        def ends(candidate: str) -> frozenset[str]:
+            return frozenset(
+                connectivity.node_for(TerminalRef(candidate, terminal)) for terminal in ("a", "b")
             )
-        return (
-            (position[0] - 84.0, position[1]),
-            (position[0] + 84.0, position[1]),
-        )
+
+        rotation = component_rotation(self.circuit, component_id)
+        along = 1 if rotation % 180 == 90 else 0
+        position = self.circuit.positions[component_id]
+        target_ends = ends(component_id)
+        if len(target_ends) != 2:
+            return [component_id]
+        return [
+            candidate
+            for candidate in self.circuit.components
+            if candidate == component_id
+            or (
+                ends(candidate) == target_ends
+                and component_rotation(self.circuit, candidate) == rotation
+                and candidate in self.circuit.positions
+                and abs(self.circuit.positions[candidate][along] - position[along]) < 1.0
+            )
+        ]
 
     def duplicate_parallel(self, component_id: str) -> str:
+        """Add a copy in parallel, stacked next to the original on empty canvas."""
         component = self.circuit.components[component_id]
-        position = self.circuit.positions[component_id]
-        rotation = self.circuit.rotations.get(component_id, component.rotation)
-        if rotation % 180 == 90:
-            new_position = (position[0] + 220.0, position[1])
-        else:
-            new_position = (position[0], position[1] + 140.0)
-        new_a, new_b = self._component_terminal_positions(new_position, rotation)
-        target_a = self._stored_endpoint_position(TerminalRef(component_id, "a"))
-        target_b = self._stored_endpoint_position(TerminalRef(component_id, "b"))
+        rotation = component_rotation(self.circuit, component_id)
+        upright = rotation % 180 == 90
+        across = 0 if upright else 1  # Copies stack sideways for upright components.
+        step = self.PARALLEL_STEP[1 if upright else 0]
+        stack = self._parallel_stack(component_id)
+
+        def spot(direction: int, steps: int) -> tuple[str, tuple[float, float]]:
+            anchor = max(stack, key=lambda item: direction * self.circuit.positions[item][across])
+            position = list(self.circuit.positions[anchor])
+            position[across] += direction * step * steps
+            return anchor, (position[0], position[1])
+
+        anchor_id, new_position = spot(1, 1)
+        for steps in range(1, 6):
+            found = False
+            for direction in (1, -1):
+                candidate_anchor, candidate = spot(direction, steps)
+                if self._spot_is_clear(candidate_anchor, candidate, rotation):
+                    anchor_id, new_position, found = candidate_anchor, candidate, True
+                    break
+            if found:
+                break
+
+        anchor_position = self.circuit.positions[anchor_id]
         new_id = self.command_stack.add_parallel_wired(
-            component_id,
+            anchor_id,
             component.kind,
             component.value,
             new_position,
             rotation,
-            octilinear_route(target_a, new_a),
-            octilinear_route(target_b, new_b),
+            octilinear_route(
+                self._terminal_point(anchor_position, rotation, "a"),
+                self._terminal_point(new_position, rotation, "a"),
+            ),
+            octilinear_route(
+                self._terminal_point(anchor_position, rotation, "b"),
+                self._terminal_point(new_position, rotation, "b"),
+            ),
         )
         self.rebuild()
         self.select_only(new_id)
@@ -842,6 +1057,11 @@ class CircuitScene(QGraphicsScene):
         merge_key = ("wire", self._wire_gesture)
         kind, identifier, end_position = target
         route = self.wire_route(start, start_position, end_position)
+        loose_end = (
+            start.junction_id
+            if isinstance(start, JunctionRef) and len(self._wires_touching(start)) == 1
+            else None
+        )
         if kind == "endpoint":
             assert isinstance(identifier, (TerminalRef, JunctionRef))
             self.command_stack.connect(start, identifier, route, merge_key=merge_key)
@@ -854,6 +1074,9 @@ class CircuitScene(QGraphicsScene):
                 identifier, before[-1], before[1:-1], after[1:-1], merge_key=merge_key
             )
             self.command_stack.connect(start, JunctionRef(junction_id), route, merge_key=merge_key)
+        if loose_end is not None:
+            # The wire simply got longer: no dot is left where its loose end was.
+            self.command_stack.dissolve_junction(loose_end, merge_key=merge_key)
         self.rebuild()
         self.circuit_changed.emit(self.circuit.revision)
         return True
@@ -886,7 +1109,9 @@ class CircuitScene(QGraphicsScene):
         if isinstance(item, TerminalItem):
             start = item.ref
         elif isinstance(item, JunctionItem):
-            start = JunctionRef(item.junction_id) if shift else None
+            # A loose wire end continues its wire; a real junction needs Shift (a plain
+            # drag slides it along its wire).
+            start = JunctionRef(item.junction_id) if shift or item.dangling else None
         elif not isinstance(item, RouteHandleItem):
             # Pressing just beside a terminal still starts a wire from it.
             start = self.endpoint_near(
@@ -911,9 +1136,7 @@ class CircuitScene(QGraphicsScene):
             super().mouseReleaseEvent(event)
             return
         if self._endpoint_position(self._wire_start) == event.scenePos() or (
-            self.endpoint_near(
-                event.scenePos(), self._scene_distance(self.GRAB_RADIUS), terminals_only=True
-            )
+            self.endpoint_near(event.scenePos(), self._scene_distance(self.GRAB_RADIUS))
             == self._wire_start
         ):
             # A click on a dot, not a drag: nothing to connect.
@@ -1051,6 +1274,20 @@ class CircuitView(QGraphicsView):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._place_overlays()
+
+    def show_all_if_hidden(self) -> None:
+        """Show the whole circuit again if part of it is off screen.
+
+        Used after the app itself places something (a clicked component, a parallel
+        copy), which may land outside the view or widen the circuit.
+        """
+        scene = self.scene()
+        if scene is None:
+            return
+        bounds = scene.itemsBoundingRect()
+        visible = self.mapToScene(self.viewport().rect()).boundingRect()
+        if not visible.contains(bounds):
+            self.fit_circuit()
 
     def reveal(self, component_ids: set[str] | tuple[str, ...]) -> None:
         """Scroll so the given components are on screen."""

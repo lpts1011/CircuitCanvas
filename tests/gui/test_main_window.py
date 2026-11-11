@@ -1,5 +1,8 @@
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
+
+from circuitcanvas.domain.wiring import JunctionRef, TerminalRef
+from circuitcanvas.ui.main_window import MainWindow
 
 
 def test_main_window_adds_repeated_components_and_updates_summary(qtbot) -> None:
@@ -475,3 +478,48 @@ def test_window_opens_no_larger_than_the_screen(qtbot) -> None:
 
     assert window.width() <= max(window.minimumWidth(), available.width())
     assert window.height() <= max(window.minimumHeight(), available.height())
+
+
+def test_deleting_a_series_component_keeps_the_circuit_solved(qtbot) -> None:
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    first = window.add_component("resistor")
+    window.add_component("capacitor")
+    qtbot.waitUntil(lambda: window.current_result is not None, timeout=2000)
+
+    window.scene.select_only(first)
+    window.delete_action.trigger()
+
+    qtbot.waitUntil(
+        lambda: window.current_result is not None and first not in window.current_result.branches,
+        timeout=2000,
+    )
+    assert window.view.banner.isHidden()  # no "wire ends in empty space" problem
+    assert set(window.circuit.components) == {"C1"}
+
+
+def test_a_component_bypassed_by_a_wire_is_explained(qtbot) -> None:
+    window = MainWindow(debounce_ms=0)
+    qtbot.addWidget(window)
+    window.show()
+    window.add_component("resistor")
+    qtbot.waitUntil(lambda: window.current_result is not None, timeout=2000)
+
+    # Hang a capacitor across two points of the same bare wire.
+    capacitor = window.scene.insert_component_at("capacitor", QPointF(600.0, 560.0))
+    bottom = window.scene.nearest_wire(QPointF(400.0, 430.0), 2.0)
+    assert bottom is not None
+    left = window.scene.split_wire_at(bottom[0], QPointF(400.0, 430.0))
+    right_wire = window.scene.nearest_wire(QPointF(800.0, 430.0), 2.0)
+    assert right_wire is not None
+    right = window.scene.split_wire_at(right_wire[0], QPointF(800.0, 430.0))
+    window.scene.connect_for_test(TerminalRef(capacitor, "a"), JunctionRef(left))
+    window.scene.connect_for_test(TerminalRef(capacitor, "b"), JunctionRef(right))
+
+    qtbot.waitUntil(lambda: not window.view.banner.isHidden(), timeout=2000)
+    assert f"{capacitor} is bypassed" in window.view.banner_label.text()
+    assert "bypassed" in window.status_label.text()
+
+    window.scene.select_only(capacitor)
+    window.delete_action.trigger()
+    qtbot.waitUntil(lambda: window.view.banner.isHidden(), timeout=2000)

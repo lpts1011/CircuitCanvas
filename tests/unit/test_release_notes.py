@@ -1,4 +1,5 @@
 import importlib.util
+import re
 from pathlib import Path
 
 import circuitcanvas
@@ -20,11 +21,14 @@ def test_changelog_has_a_section_for_the_current_version() -> None:
     module = _release_notes_module()
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
-    notes = module.release_notes(changelog, circuitcanvas.__version__)
+    version = circuitcanvas.__version__
+    notes = module.release_notes(changelog, version)
 
-    assert "Automatic time span" in notes
-    assert f"CircuitCanvas-{circuitcanvas.__version__}-Windows-x64.zip" in notes
-    assert "## 0.3.1" not in notes
+    # The current version's own section, and nothing from the release before it.
+    assert module.changelog_section(changelog, version)
+    assert notes.startswith(module.changelog_section(changelog, version))
+    assert f"CircuitCanvas-{version}-Windows-x64.zip" in notes
+    assert not re.search(r"^## \d", notes, flags=re.MULTILINE)
 
 
 def test_section_stops_at_the_next_version() -> None:

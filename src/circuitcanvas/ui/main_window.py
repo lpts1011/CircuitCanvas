@@ -40,7 +40,7 @@ from .formatting import format_si
 from .help import ABOUT_HTML, QUICK_START_HTML, HelpDialog, shortcuts_html
 from .icons import icon
 from .inspector import ComponentInspector
-from .messages import describe
+from .messages import describe, describe_bypassed
 from .palette import ComponentPalette
 from .playback import PlaybackController
 from .simulation_controller import SimulationController
@@ -405,9 +405,11 @@ class MainWindow(QMainWindow):
     # ----- Editing ----------------------------------------------------------------------
 
     def add_component(self, kind: str) -> str:
+        """Add a component with one click, somewhere it has room, and keep it in view."""
         if self.circuit.wires:
-            wire_id, position = self.scene.best_wire_insertion()
-            return self.scene.insert_component_on_wire(kind, wire_id, position)
+            component_id = self.scene.add_component_in_series(kind)
+            self.view.show_all_if_hidden()
+            return component_id
         return self.scene.insert_component_for_test(kind)
 
     def _circuit_changed(self, revision: int) -> None:
@@ -484,6 +486,7 @@ class MainWindow(QMainWindow):
     def _duplicate_parallel(self, component_id: str) -> None:
         if self.circuit.wires:
             self.scene.duplicate_parallel(component_id)
+            self.view.show_all_if_hidden()
             return
         component = self.circuit.components[component_id]
         self.scene.insert_component_for_test(component.kind, parallel_to=component_id)
@@ -539,12 +542,23 @@ class MainWindow(QMainWindow):
             float(result.time[-1]), auto=self.circuit.settings.auto_duration
         )
         self.scene.set_problem_components(())
-        self.view.hide_banner()
-        self.details.set_status(
-            "ok",
+        solved = (
             "✓ Circuit solved. Press <b>Play</b>, or drag the time slider at the top, "
-            "to watch it change after the battery is connected.",
+            "to watch it change after the battery is connected."
         )
+        bypassed = tuple(
+            component.id
+            for component in self.circuit.snapshot().components
+            if component.node_a == component.node_b
+        )
+        if bypassed:
+            # Solved, but a zero reading with no explanation looks like a bug.
+            note = describe_bypassed(bypassed)
+            self.view.show_banner("info", note)
+            self.details.set_status("info", f"{solved}<br><br>ℹ {note}")
+        else:
+            self.view.hide_banner()
+            self.details.set_status("ok", solved)
         self._refresh_graph()
         self._show_time_index(index)
         self._refresh_equations()

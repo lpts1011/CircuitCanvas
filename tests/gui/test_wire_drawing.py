@@ -3,7 +3,8 @@ from PySide6.QtTest import QTest
 
 from circuitcanvas.domain.circuit import Circuit
 from circuitcanvas.domain.wiring import JunctionRef, TerminalRef
-from circuitcanvas.ui.circuit_scene import CircuitScene
+from circuitcanvas.solver.validation import validate
+from circuitcanvas.ui.circuit_scene import CircuitScene, CircuitView
 
 
 def _scene_with_loose_capacitor() -> tuple[CircuitScene, str]:
@@ -133,3 +134,50 @@ def test_escape_cancels_a_wire_being_drawn(qtbot) -> None:
 
     assert not window.scene.drawing_wire
     assert window.scene._wire_preview is None
+
+
+def test_dragging_a_loose_wire_end_reconnects_it_without_shift(qtbot) -> None:
+    """Deleting a wire leaves loose ends; a plain drag from one must repair the circuit."""
+    scene = CircuitScene(Circuit.starter_loop())
+    scene.insert_component_on_wire("resistor", *scene.best_wire_insertion())
+    scene.command_stack.delete_elements(wire_ids=["W2"])  # the right-hand side of the loop
+    scene.rebuild()
+    assert scene.junction_items["J1"].dangling
+    assert scene.junction_items["J2"].dangling
+
+    scene.begin_wire(JunctionRef("J1"))
+    created = scene.finish_wire(scene.junction_items["J2"].scenePos())
+
+    assert created
+    assert validate(scene.circuit.snapshot()) == ()
+    # The wire simply continues: no leftover dot where its loose end was.
+    assert "J1" not in scene.circuit.junctions
+    assert scene.command_stack.undo()  # the whole repair is one undo step
+    assert "J1" in scene.circuit.junctions
+    assert [d.code for d in validate(scene.circuit.snapshot())] == ["dangling-wire"]
+
+
+def test_pressing_a_loose_wire_end_starts_a_wire_but_a_junction_needs_shift(qtbot) -> None:
+    scene = CircuitScene(Circuit.starter_loop())
+    view = CircuitView(scene)
+    qtbot.addWidget(view)
+    view.resize(1200, 700)
+    view.show()
+    qtbot.waitExposed(view)
+    view.fit_circuit()
+
+    def press_at_junction(junction_id: str):
+        point = view.mapFromScene(scene.junction_items[junction_id].scenePos())
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        return point
+
+    point = press_at_junction("J1")  # two wires meet here: a real corner
+    assert not scene.drawing_wire
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    scene.command_stack.delete_elements(wire_ids=["W2"])
+    scene.rebuild()
+    point = press_at_junction("J1")  # now the loose end of a wire
+    assert scene.drawing_wire
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert not scene.drawing_wire

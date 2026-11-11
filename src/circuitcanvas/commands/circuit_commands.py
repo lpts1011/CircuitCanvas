@@ -15,6 +15,8 @@ from circuitcanvas.domain.components import (
     make_component,
     replace_value,
 )
+from circuitcanvas.domain.layout import endpoint_position, simplify_polyline, terminal_position
+from circuitcanvas.domain.netlist import derive_connectivity
 from circuitcanvas.domain.wiring import EndpointRef, Junction, JunctionRef, Point, TerminalRef, Wire
 
 _PREFIX = {
@@ -80,35 +82,202 @@ def update_component_value(circuit: Circuit, component_id: str, value: float) ->
     circuit.replace_component(replace_value(component, value))
 
 
-def delete_component(circuit: Circuit, component_id: str) -> Component:
-    try:
-        component = circuit.components[component_id]
-        position = circuit.positions.get(component_id, (0.0, 0.0))
-        rotation = circuit.rotations.get(component_id, component.rotation) % 360
-        terminal_junctions: dict[str, JunctionRef] = {}
-        for terminal in ("a", "b"):
-            ref = TerminalRef(component_id, terminal)
-            if not any(ref in (wire.start, wire.end) for wire in circuit.wires.values()):
-                continue
+def _wires_at(circuit: Circuit, ref: EndpointRef) -> list[Wire]:
+    return [wire for wire in circuit.wires.values() if ref in (wire.start, wire.end)]
+
+
+def _other_end(wire: Wire, ref: EndpointRef) -> EndpointRef:
+    return wire.end if wire.start == ref else wire.start
+
+
+def _route_from(wire: Wire, ref: EndpointRef) -> tuple[Point, ...]:
+    """The wire's bends in order, walking away from ``ref``."""
+    return wire.route if wire.start == ref else tuple(reversed(wire.route))
+
+
+def _is_in_series(circuit: Circuit, component_id: str) -> bool:
+    """True when closing the gap left by this component cannot short anything out.
+
+    A component is in series with its neighbour when one of its ends meets exactly
+    one other terminal. Joining the wires on either side then keeps the circuit the
+    same apart from the missing component. Otherwise (a parallel branch, or a
+    component bypassed by a wire) the two ends must stay apart.
+    """
+    connectivity = derive_connectivity(circuit)
+    node_a = connectivity.node_for(TerminalRef(component_id, "a"))
+    node_b = connectivity.node_for(TerminalRef(component_id, "b"))
+    if node_a == node_b:
+        return False
+    for other_id in circuit.components:
+        if other_id == component_id:
+            continue
+        ends = {
+            connectivity.node_for(TerminalRef(other_id, "a")),
+            connectivity.node_for(TerminalRef(other_id, "b")),
+        }
+        if ends == {node_a, node_b}:
+            return False  # A parallel partner: joining the ends would short it.
+    terminals_per_node: dict[str, int] = defaultdict(int)
+    for node in connectivity.terminal_nodes.values():
+        terminals_per_node[node] += 1
+    return terminals_per_node[node_a] == 2 or terminals_per_node[node_b] == 2
+
+
+def _remove_unused_junctions(circuit: Circuit, candidates: Iterable[EndpointRef]) -> None:
+    for ref in candidates:
+        if isinstance(ref, JunctionRef) and not _wires_at(circuit, ref):
+            circuit.junctions.pop(ref.junction_id, None)
+
+
+def _close_gap(circuit: Circuit, component_id: str) -> None:
+    """Join the wires on both sides of a series component that is about to go."""
+    ref_a = TerminalRef(component_id, "a")
+    ref_b = TerminalRef(component_id, "b")
+    position_a = terminal_position(circuit, ref_a)
+    position_b = terminal_position(circuit, ref_b)
+    wires_a = _wires_at(circuit, ref_a)
+    wires_b = _wires_at(circuit, ref_b)
+
+    if len(wires_a) == 1 and len(wires_b) == 1:
+        wire_a, wire_b = wires_a[0], wires_b[0]
+        far_a = _other_end(wire_a, ref_a)
+        far_b = _other_end(wire_b, ref_b)
+        del circuit.wires[wire_b.id]
+        if far_a == far_b:
+            del circuit.wires[wire_a.id]  # It would be a wire from a dot to itself.
+            _remove_unused_junctions(circuit, (far_a,))
+            return
+        path = simplify_polyline(
+            (
+                endpoint_position(circuit, far_a),
+                *reversed(_route_from(wire_a, ref_a)),
+                position_a,
+                position_b,
+                *_route_from(wire_b, ref_b),
+                endpoint_position(circuit, far_b),
+            )
+        )
+        circuit.wires[wire_a.id] = Wire(wire_a.id, far_a, far_b, path[1:-1])
+        return
+
+    # Several wires meet at one of the ends: they now all meet at a junction there.
+    keep_b = len(wires_b) >= len(wires_a)
+    junction_id = circuit.next_junction_id()
+    junction_position = position_b if keep_b else position_a
+    circuit.junctions[junction_id] = Junction(junction_id, junction_position)
+    junction = JunctionRef(junction_id)
+    kept_ref, moved_ref = (ref_b, ref_a) if keep_b else (ref_a, ref_b)
+    moved_position = position_a if keep_b else position_b
+    for wire in _wires_at(circuit, kept_ref):
+        circuit.wires[wire.id] = replace(
+            wire,
+            start=junction if wire.start == kept_ref else wire.start,
+            end=junction if wire.end == kept_ref else wire.end,
+        )
+    for wire in _wires_at(circuit, moved_ref):
+        far = _other_end(wire, moved_ref)
+        path = simplify_polyline(
+            (
+                endpoint_position(circuit, far),
+                *reversed(_route_from(wire, moved_ref)),
+                moved_position,
+                junction_position,
+            )
+        )
+        circuit.wires[wire.id] = Wire(wire.id, far, junction, path[1:-1])
+
+
+def _detach(circuit: Circuit, component_id: str) -> None:
+    """Take a component out without joining its ends.
+
+    A wire that only led to this component goes with it, so no wire is left ending
+    in empty space. Where several wires met at a terminal, they keep meeting at a
+    junction dot in the same place.
+    """
+    orphan_candidates: list[EndpointRef] = []
+    for terminal in ("a", "b"):
+        ref = TerminalRef(component_id, terminal)
+        wires = _wires_at(circuit, ref)
+        if len(wires) == 1:
+            orphan_candidates.append(_other_end(wires[0], ref))
+            del circuit.wires[wires[0].id]
+        elif len(wires) > 1:
             junction_id = circuit.next_junction_id()
-            direction = -1.0 if terminal == "a" else 1.0
-            if rotation in {90, 270}:
-                junction_position = (position[0], position[1] + direction * 84.0)
-            else:
-                junction_position = (position[0] + direction * 84.0, position[1])
-            circuit.junctions[junction_id] = Junction(junction_id, junction_position)
-            terminal_junctions[terminal] = JunctionRef(junction_id)
-        for wire_id, wire in tuple(circuit.wires.items()):
-            start = wire.start
-            end = wire.end
-            if isinstance(start, TerminalRef) and start.owner_id == component_id:
-                start = terminal_junctions[start.terminal]
-            if isinstance(end, TerminalRef) and end.owner_id == component_id:
-                end = terminal_junctions[end.terminal]
-            circuit.wires[wire_id] = replace(wire, start=start, end=end)
-        return circuit.remove_component(component_id)
-    except KeyError:
-        raise KeyError(component_id) from None
+            circuit.junctions[junction_id] = Junction(junction_id, terminal_position(circuit, ref))
+            junction = JunctionRef(junction_id)
+            for wire in wires:
+                circuit.wires[wire.id] = replace(
+                    wire,
+                    start=junction if wire.start == ref else wire.start,
+                    end=junction if wire.end == ref else wire.end,
+                )
+    _remove_unused_junctions(circuit, orphan_candidates)
+
+
+def delete_component(circuit: Circuit, component_id: str) -> Component:
+    """Remove a component, leaving the rest of the circuit connected sensibly.
+
+    A component in series is replaced by plain wire, so the loop stays closed. A
+    parallel branch disappears together with its leads.
+    """
+    if component_id not in circuit.components:
+        raise KeyError(component_id)
+    ref_a = TerminalRef(component_id, "a")
+    ref_b = TerminalRef(component_id, "b")
+    wired_both_ends = bool(_wires_at(circuit, ref_a)) and bool(_wires_at(circuit, ref_b))
+    if wired_both_ends and _is_in_series(circuit, component_id):
+        _close_gap(circuit, component_id)
+    else:
+        _detach(circuit, component_id)
+    return circuit.remove_component(component_id)
+
+
+def dissolve_junction(circuit: Circuit, junction_id: str) -> bool:
+    """Turn a dot where exactly two wires meet end to end into one continuous wire."""
+    junction = JunctionRef(junction_id)
+    wires = _wires_at(circuit, junction)
+    if len(wires) != 2:
+        return False
+    first, second = wires
+    far_first = _other_end(first, junction)
+    far_second = _other_end(second, junction)
+    if far_first == far_second or junction in (far_first, far_second):
+        return False
+    path = simplify_polyline(
+        (
+            endpoint_position(circuit, far_first),
+            *reversed(_route_from(first, junction)),
+            circuit.junctions[junction_id].position,
+            *_route_from(second, junction),
+            endpoint_position(circuit, far_second),
+        )
+    )
+    del circuit.wires[second.id]
+    circuit.wires[first.id] = Wire(first.id, far_first, far_second, path[1:-1])
+    del circuit.junctions[junction_id]
+    circuit.touch()
+    return True
+
+
+def shift_layout(circuit: Circuit, cut: float, distance: float) -> None:
+    """Slide everything to the right of ``x = cut`` sideways to open up space.
+
+    A negative ``distance`` slides everything to the left of the cut further left
+    instead. Horizontal wires crossing the cut simply get longer.
+    """
+
+    def moved(point: Point) -> Point:
+        beyond = point[0] > cut if distance > 0 else point[0] < cut
+        return (point[0] + distance, point[1]) if beyond else point
+
+    for component_id, position in tuple(circuit.positions.items()):
+        circuit.positions[component_id] = moved(position)
+    for junction_id, junction in tuple(circuit.junctions.items()):
+        circuit.junctions[junction_id] = replace(junction, position=moved(junction.position))
+    for wire_id, wire in tuple(circuit.wires.items()):
+        if wire.route:
+            circuit.wires[wire_id] = replace(wire, route=tuple(moved(p) for p in wire.route))
+    circuit.touch()
 
 
 def delete_elements(
@@ -375,6 +544,8 @@ class CircuitCommandStack:
         rotation: int,
         start_route: tuple[Point, ...] = (),
         end_route: tuple[Point, ...] = (),
+        *,
+        merge_key: Hashable | None = None,
     ) -> str:
         """Replace one ideal-wire span with a component as one history entry."""
         component_kind = _kind(kind)
@@ -394,9 +565,19 @@ class CircuitCommandStack:
             self._replace_wire(component_id, original, position, rotation, start_route, end_route)
             return component_id
 
-        result = self._execute(operation)
+        result = self._execute(operation, merge_key)
         assert isinstance(result, str)
         return result
+
+    def shift_layout(
+        self, cut: float, distance: float, *, merge_key: Hashable | None = None
+    ) -> None:
+        """Open up horizontal space at ``x = cut`` (see :func:`shift_layout`)."""
+        self._execute(lambda: shift_layout(self.circuit, cut, distance), merge_key)
+
+    def dissolve_junction(self, junction_id: str, *, merge_key: Hashable | None = None) -> None:
+        """Make the two wires that meet at a junction one wire (see :func:`dissolve_junction`)."""
+        self._execute(lambda: dissolve_junction(self.circuit, junction_id), merge_key)
 
     def splice_component_into_wire(
         self,

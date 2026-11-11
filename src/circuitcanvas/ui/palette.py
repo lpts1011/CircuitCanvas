@@ -31,7 +31,7 @@ class DraggableComponentButton(QToolButton):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setToolTip(
             f"{KIND_NAMES[kind]}: {_DESCRIPTIONS[kind]}\n\n"
-            "Click to add it in series on the longest wire,\n"
+            "Click to add it in series where there is room,\n"
             "or drag it onto the wire where you want it."
         )
 

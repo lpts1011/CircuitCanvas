@@ -53,7 +53,8 @@ def describe(diagnostic: Diagnostic, *, has_components: bool) -> Problem:
     if code == "dangling-wire":
         return Problem(
             "problem",
-            "A wire ends in empty space. Connect its loose end to a dot or a wire, or delete it.",
+            "A wire ends in empty space. Drag its orange end onto a dot or a wire to "
+            "connect it, or select the wire and press Delete.",
         )
     if code == "open-circuit":
         return Problem(
@@ -71,3 +72,17 @@ def describe(diagnostic: Diagnostic, *, has_components: bool) -> Problem:
             ids,
         )
     return Problem("problem", diagnostic.message, ids)
+
+
+def describe_bypassed(component_ids: tuple[str, ...]) -> str:
+    """Explain why a solved circuit shows zero for components shorted out by a wire."""
+    if len(component_ids) == 1:
+        name = component_ids[0]
+        return (
+            f"{name} is bypassed: a wire joins both of its ends, so no current flows "
+            f"through it. Delete that wire, or drag {name} onto it."
+        )
+    return (
+        f"{_names(component_ids)} are bypassed: a wire joins both ends of each, so no "
+        "current flows through them. Delete those wires, or drag the components onto them."
+    )

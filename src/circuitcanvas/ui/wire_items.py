@@ -108,11 +108,27 @@ class JunctionItem(QGraphicsObject):
         self.setZValue(4)
         self.targeted = False
         self.candidate = False
-        self.setToolTip(
-            "Junction: wires that meet here are connected.\n"
-            "Drag to slide it along its wire · Shift-drag to draw a new wire · "
-            "Delete to remove"
-        )
+        #: The loose end of a wire: only one wire reaches this dot.
+        self.dangling = False
+        self.set_dangling(False)
+
+    def set_dangling(self, dangling: bool) -> None:
+        """A loose wire end is drawn orange and starts a new wire when dragged."""
+        self.dangling = dangling
+        if dangling:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.setToolTip(
+                "Loose wire end: it is not connected to anything yet.\n"
+                "Drag it onto a dot or a wire to connect it, or press Delete to remove it."
+            )
+        else:
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+            self.setToolTip(
+                "Junction: wires that meet here are connected.\n"
+                "Drag to slide it along its wire · Shift-drag to draw a new wire · "
+                "Delete to remove"
+            )
+        self.update()
 
     def boundingRect(self) -> QRectF:
         return QRectF(-16, -16, 32, 32)
@@ -134,11 +150,11 @@ class JunctionItem(QGraphicsObject):
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         _paint_dot_halo(painter, targeted=self.targeted, candidate=self.candidate)
-        idle = "#2563eb" if self.isSelected() else "#334155"
+        idle = "#2563eb" if self.isSelected() else ("#f97316" if self.dangling else "#334155")
         color = TARGET_GREEN if self.targeted else idle
         painter.setPen(QPen(QColor("#ffffff"), 2))
         painter.setBrush(QColor(color))
-        radius = 9.0 if self.targeted else 7.0
+        radius = 9.0 if self.targeted else (8.0 if self.dangling else 7.0)
         painter.drawEllipse(QPointF(0, 0), radius, radius)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
@@ -245,18 +261,29 @@ class WireItem(QGraphicsObject):
         self.stale = stale
         self.update()
 
+    #: Roughly how far apart the current arrows are, in scene units.
+    ARROW_SPACING = 90.0
+
+    def _arrow_count(self) -> int:
+        """Arrows are evenly spaced, so a short wire carries one and a long wire several."""
+        return max(1, round(self._path.length() / self.ARROW_SPACING))
+
     def advance_phase(self, seconds: float) -> None:
         if not self.arrows_visible:
             return
-        speed = min(2.5, max(0.15, 0.15 + 0.45 * math.log10(1 + abs(self.current) / 1e-6)))
+        # Arrows travel at the same pace on every wire, faster for a larger current.
+        pace = 40.0 * min(2.5, max(0.15, 0.15 + 0.45 * math.log10(1 + abs(self.current) / 1e-6)))
+        gap = max(self._path.length() / self._arrow_count(), 1.0)
         direction = 1.0 if self.current >= 0 else -1.0
-        self.phase = (self.phase + direction * speed * seconds) % 1.0
+        self.phase = (self.phase + direction * pace * seconds / gap) % 1.0
         self.update()
 
     def arrow_positions(self) -> tuple[float, ...]:
+        """Where the arrows sit, as fractions of the wire's length."""
         if not self.arrows_visible:
             return ()
-        return tuple((self.phase + offset) % 1.0 for offset in (0.0, 0.25, 0.5, 0.75))
+        count = self._arrow_count()
+        return tuple(((self.phase + index) % count) / count for index in range(count))
 
     def paint(
         self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None
