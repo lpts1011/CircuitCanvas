@@ -4,6 +4,18 @@ from __future__ import annotations
 
 import math
 
+from circuitcanvas.domain.layout import simplify_polyline
+
+__all__ = [
+    "is_octilinear",
+    "normalized_octilinear_polyline",
+    "octilinear_route",
+    "project_to_octilinear",
+    "project_to_polyline",
+    "simplify_polyline",
+    "split_polyline",
+]
+
 type Point = tuple[float, float]
 
 TOLERANCE = 1e-6

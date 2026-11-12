@@ -64,3 +64,18 @@ def test_wire_item_path_contains_only_horizontal_vertical_or_45_degree_segments(
         is_octilinear((left.x(), left.y()), (right.x(), right.y()))
         for left, right in zip(points, points[1:], strict=False)
     )
+
+
+def test_short_wires_carry_fewer_arrows_than_long_ones(qtbot) -> None:
+    wire = Wire("W1", TerminalRef("V1", "a"), TerminalRef("R1", "a"))
+    short = WireItem(wire, QPointF(0.0, 0.0), QPointF(60.0, 0.0))
+    long = WireItem(wire, QPointF(0.0, 0.0), QPointF(720.0, 0.0))
+    short.set_current(0.1)
+    long.set_current(0.1)
+
+    assert len(short.arrow_positions()) == 1
+    assert len(long.arrow_positions()) == 8
+    # Evenly spread along the wire, never bunched together.
+    positions = sorted(long.arrow_positions())
+    gaps = [right - left for left, right in zip(positions, positions[1:], strict=False)]
+    assert all(abs(gap - 1 / 8) < 1e-9 for gap in gaps)

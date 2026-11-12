@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.1
+
+Building a circuit no longer leaves you with a mess to clean up.
+
+### Changed
+
+- **Added components never land on top of each other.** Clicking Resistor, Capacitor, or
+  Inductor puts the new part on a clear stretch of wire. When the loop is full it grows wider
+  to make room, and one Undo takes back both the part and the extra room.
+- **Parallel copies stack neatly.** A parallel copy sits beside the original on empty canvas,
+  joined by two straight leads, instead of on top of whatever was nearby.
+- **Deleting a part keeps the circuit complete.** The wire closes up behind a part that was
+  in series, a parallel branch disappears together with its leads, and no wire is left
+  ending in empty space.
+- **A loose wire end is an orange dot you can drag** onto a dot or a wire to finish it. No
+  Shift key is needed, and the wire simply gets longer.
+- The view zooms out by itself when a part the app placed would be off screen.
+- A new part faces along its wire, so no wire runs hidden underneath it.
+- Current arrows are evenly spaced and move at the same pace on every wire; short wires no
+  longer carry a cluster of four.
+- When a wire joins both ends of a part, a note above the circuit explains why that part
+  reads 0 V and 0 A and how to fix it.
+
+### Fixed
+
+- The "Series and parallel resistors" example had wires running underneath a resistor. All
+  five examples are redrawn with the same layout the app produces
+  (`scripts/make_examples.py`).
+
 ## 0.4.0
 
 The "usable by anyone" release: CircuitCanvas now explains itself, picks sensible

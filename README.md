@@ -18,7 +18,7 @@ Get the app from the [latest release](https://github.com/lpts1011/CircuitCanvas/
 
 ## Your first circuit in one minute
 
-1. **Click Resistor** on the left. It drops into the battery loop and the circuit is solved: the resistor shows its voltage (blue) and current (orange), and arrows show the current flowing.
+1. **Click Resistor** on the left. It drops into the battery loop and the circuit is solved: the resistor shows its voltage (blue) and current (orange), and arrows show the current flowing. Keep clicking to add more: each part gets its own clear stretch of wire, and the loop grows when it fills up.
 2. **Click Capacitor.** Now it is an RC circuit, and the graph shows the capacitor charging.
 3. **Double-click the resistor** and type `10k`. The capacitor charges more slowly, and the time span grows automatically so you still see the whole curve.
 4. Press **Play** at the top to watch it happen, or drag the time slider next to it. Open the **Kirchhoff's laws** tab to see the laws with the solved numbers filled in.
@@ -38,7 +38,8 @@ The application does not call an external circuit simulator. Its Python solver a
 ## Highlights
 
 - A ready-made battery loop that becomes a valid circuit as soon as a component replaces part of its wire
-- Drop-on-wire series insertion plus automatically wired parallel duplication
+- One-click series insertion that finds free wire (and widens the loop when it is full), drop-on-wire insertion, and automatically wired, neatly stacked parallel copies
+- Deleting a series component closes the wire behind it; deleting a parallel branch removes its leads
 - Explicit terminal wiring with junctions and non-connecting wire crossings
 - Clean horizontal, vertical, or 45° wire routing—never arbitrary-angle segments
 - Movable components, 90° rotation, route-constrained junctions, and editable wire bends
@@ -63,12 +64,12 @@ The application does not call an external circuit simulator. Its Python solver a
 ## Build a circuit: the full guide
 
 1. The canvas opens with a battery, a complete construction loop, and a "Start here" card. The wire-only loop is intentionally marked as a short circuit until you insert a component.
-2. Click **Resistor**, **Capacitor**, or **Inductor** to insert it **in series** on the longest wire, or drag it onto the exact wire you want. The palette stays visible while you edit.
+2. Click **Resistor**, **Capacitor**, or **Inductor** to insert it **in series** on a clear stretch of wire (the loop widens by itself when there is no room left), or drag it onto the exact wire you want. The palette stays visible while you edit.
 3. Double-click a component (or select it) to edit it in the **Details** panel on the right, which also shows its voltage, current, power, and stored energy at the chosen moment. Type values such as `4.7k`, `10u`, `4k7`, or `2.2 MΩ`, or drag the logarithmic slider. Double-click the battery to change its voltage. With nothing selected, the panel shows the whole circuit.
-4. Choose **Parallel copy** (or right-click → **Add parallel copy**) to create a fully wired parallel branch, or drop a component on empty canvas and connect it manually.
+4. Choose **Parallel copy** (or right-click → **Add parallel copy**) to create a fully wired parallel branch beside the selected component, or drop a component on empty canvas and connect it manually.
 5. Drag from a terminal dot towards another dot or a wire: the wire follows the pointer with clean right-angle bends and snaps on when it gets close, and the target turns green. Ending on a wire creates a real electrical junction; a visual crossing without a junction dot remains disconnected. Releasing in empty space adds nothing, and Esc cancels.
-6. Shift-drag a junction dot to continue wiring from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
-7. **Rotate** (or `R`) turns the selected component. **Delete**/**Backspace** removes whatever is selected: components, wires, junction dots, or bend handles.
+6. A wire with a loose end shows an orange dot: drag it onto a dot or a wire to finish the wire. Shift-drag a junction dot to start a new wire from it. Every segment snaps to horizontal, vertical, or 45°, while junctions and bend handles remain on their wire paths when dragged.
+7. **Rotate** (or `R`) turns the selected component. **Delete**/**Backspace** removes whatever is selected: components, wires, junction dots, or bend handles. Deleting a component in series closes the wire behind it, so the circuit stays complete.
 8. Scroll (or two-finger swipe) to pan the canvas. Zoom with ⌘/Ctrl + scroll, a trackpad pinch, ⌘/Ctrl `+`/`−`, or the buttons in the canvas corner; the fit button (⌘/Ctrl `0`) shows the whole circuit again. Right-click anything for a menu of what you can do with it.
 9. **Time span** is automatic by default: about five of the circuit's slowest time constants, so an RC with τ = 10 s is simulated for 50 s. Type a value such as `200 ms` to set it yourself.
 10. Open **Kirchhoff's laws** and switch between **With numbers** and **Matrix form**. Selecting a law outlines its circuit elements without changing the selection.
@@ -144,7 +145,7 @@ The suite covers free graph edits, schema migration, MNA stamps, analytical tran
 pyinstaller --noconfirm circuitcanvas.spec
 ```
 
-On macOS this creates `dist/CircuitCanvas.app`; on Windows, `dist/CircuitCanvas/CircuitCanvas.exe`. The icon files in [`assets/icon/`](assets/icon) are generated by `scripts/make_icon.py`.
+On macOS this creates `dist/CircuitCanvas.app`; on Windows, `dist/CircuitCanvas/CircuitCanvas.exe`. The icon files in [`assets/icon/`](assets/icon) are generated by `scripts/make_icon.py`, the README screenshot by `scripts/capture_screenshot.py`, and the bundled examples by `scripts/make_examples.py`.
 
 ### Publish a release
 
@@ -152,8 +153,8 @@ On macOS this creates `dist/CircuitCanvas.app`; on Windows, `dist/CircuitCanvas/
 2. Push a tag with that version:
 
    ```bash
-   git tag v0.4.0
-   git push origin v0.4.0
+   git tag v0.4.1
+   git push origin v0.4.1
    ```
 
 3. The [Release workflow](.github/workflows/release.yml) runs the checks, builds the macOS and Windows apps (and checks that each one starts), builds the Python wheel, and opens a **draft** GitHub Release with notes taken from the changelog. Review it and click **Publish**.

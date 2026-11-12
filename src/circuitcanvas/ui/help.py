@@ -30,8 +30,8 @@ QUICK_START_HTML = (
 <h2>Build your first circuit</h2>
 <ol>
   <li><b>Add a component.</b> Click <i>Resistor</i>, <i>Capacitor</i> or <i>Inductor</i>
-  on the left. It is placed in series on the longest wire. You can also drag it onto
-  the exact wire you want.</li>
+  on the left. It is placed in series where there is room, and the loop grows when it
+  gets crowded. You can also drag it onto the exact wire you want.</li>
   <li><b>Set its value.</b> Double-click the component, or select it and use the
   <i>Details</i> panel on the right. Type values such as <code>4.7k</code>,
   <code>10u</code> or <code>4k7</code>, or drag the slider.</li>
@@ -47,10 +47,14 @@ QUICK_START_HTML = (
   Releasing anywhere else adds nothing, and Esc cancels.</li>
   <li>Ending on a wire joins it with a junction dot. Wires that merely cross are
   <i>not</i> connected.</li>
-  <li>Shift-drag a junction dot to start a new wire from it. Double-click a wire to add
-  a bend that you can drag.</li>
+  <li>A wire with a loose end shows an orange dot there: drag that dot onto a dot or a
+  wire to finish it. Shift-drag a junction dot to start a new wire from it. Double-click
+  a wire to add a bend that you can drag.</li>
+  <li><b>Parallel copy</b> (in the Details panel, or right-click) adds a copy of the
+  selected component side by side with it, already wired.</li>
   <li>Select anything and press <b>Delete</b> to remove it, or right-click it for more
-  choices. Every edit can be undone.</li>
+  choices. Deleting a component in series closes the wire behind it, so the circuit
+  stays complete. Every edit can be undone.</li>
 </ul>
 
 <h3>Understanding what you see</h3>
@@ -75,6 +79,7 @@ _GESTURES = (
     ("Click a palette button", "Add that component in series"),
     ("Drag a palette button onto a wire", "Insert the component there"),
     ("Drag from a terminal dot", "Draw a wire"),
+    ("Drag an orange loose wire end", "Continue that wire"),
     ("Shift + drag a junction dot", "Draw a wire from a junction"),
     ("Double-click a wire", "Add a draggable bend"),
     ("Double-click a component", "Edit its value"),

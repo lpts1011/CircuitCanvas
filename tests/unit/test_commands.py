@@ -77,11 +77,12 @@ def test_free_wiring_commands_connect_split_move_and_undo() -> None:
     assert circuit.positions[resistor] == (300.0, 180.0)
 
 
-def test_deleting_connected_component_leaves_reconnectable_junctions() -> None:
+def test_deleting_a_component_shared_by_several_wires_leaves_a_junction() -> None:
     circuit = Circuit.new()
     stack = CircuitCommandStack(circuit)
     resistor = stack.add_loose_component(ComponentKind.RESISTOR, 100.0, (320.0, 220.0))
     stack.connect(TerminalRef("V1", "a"), TerminalRef(resistor, "a"))
+    stack.connect(TerminalRef("V1", "b"), TerminalRef(resistor, "a"))
 
     stack.delete(resistor)
 
@@ -91,7 +92,9 @@ def test_deleting_connected_component_leaves_reconnectable_junctions() -> None:
         for wire in circuit.wires.values()
         for endpoint in (wire.start, wire.end)
     )
-    assert circuit.junctions
+    # The two wires that met at the terminal still meet, now at a junction dot.
+    assert len(circuit.junctions) == 1
+    assert len(circuit.wires) == 2
 
 
 def test_connect_to_new_junction_is_one_undoable_edit() -> None:
@@ -283,3 +286,63 @@ def test_splicing_requires_an_unwired_component() -> None:
     assert circuit.rotations[loose] == 90
     with pytest.raises(ValueError, match="already wired"):
         stack.splice_component_into_wire(loose, "W1", (500.0, 290.0), 0)
+
+
+def test_shift_layout_opens_space_and_merges_with_the_insert_that_needed_it() -> None:
+    circuit = Circuit.starter_loop(12.0)
+    stack = CircuitCommandStack(circuit)
+    first = stack.insert_component_on_wire("W1", ComponentKind.RESISTOR, 100.0, (400.0, 290.0), 0)
+    stack.set_wire_route("W2", ((980.0, 360.0),))
+
+    stack.shift_layout(500.0, 120.0, merge_key=("add", 1))
+    wire_id = next(w.id for w in circuit.wires.values() if w.start == TerminalRef(first, "b"))
+    second = stack.insert_component_on_wire(
+        wire_id, ComponentKind.CAPACITOR, 1e-6, (700.0, 290.0), 0, merge_key=("add", 1)
+    )
+
+    assert circuit.positions[first] == (400.0, 290.0)  # left of the cut: untouched
+    assert circuit.junctions["J1"].position == (1100.0, 290.0)
+    assert circuit.junctions["J2"].position == (1100.0, 430.0)
+    assert circuit.wires["W2"].route == ((1100.0, 360.0),)
+    assert validate(circuit.snapshot()) == ()
+
+    assert stack.undo()  # one step undoes both the new component and the extra room
+    assert second not in circuit.components
+    assert circuit.junctions["J1"].position == (980.0, 290.0)
+
+
+def test_shift_layout_can_push_the_left_side_further_left() -> None:
+    circuit = Circuit.starter_loop(12.0)
+    stack = CircuitCommandStack(circuit)
+    stack.move_junction("J1", (40.0, 290.0))
+
+    stack.shift_layout(60.0, -100.0)
+
+    assert circuit.junctions["J1"].position == (-60.0, 290.0)
+    assert circuit.junctions["J2"].position == (980.0, 430.0)
+
+
+def test_dissolve_junction_joins_two_wires_into_one() -> None:
+    circuit = Circuit.starter_loop(12.0)
+    stack = CircuitCommandStack(circuit)
+
+    stack.dissolve_junction("J1")
+
+    assert "J1" not in circuit.junctions
+    assert len(circuit.wires) == 2
+    joined = next(wire for wire in circuit.wires.values() if wire.start == TerminalRef("V1", "a"))
+    assert joined.end == JunctionRef("J2")
+    assert joined.route == ((980.0, 290.0),)  # the corner survives as a bend
+    assert stack.undo()
+    assert "J1" in circuit.junctions
+
+
+def test_dissolve_junction_leaves_a_real_junction_alone() -> None:
+    circuit = Circuit.starter_loop(12.0)
+    stack = CircuitCommandStack(circuit)
+    stack.connect(JunctionRef("J1"), TerminalRef("V1", "b"))
+
+    stack.dissolve_junction("J1")
+
+    assert "J1" in circuit.junctions
+    assert len(circuit.wires) == 4
